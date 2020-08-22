@@ -134,3 +134,7 @@ dmypy.json
 jobs
 out
 gen
+data
+*.rdb
+*.db
+
