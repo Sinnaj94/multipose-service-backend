@@ -8,10 +8,22 @@ import json
 import uuid
 import parsers
 
+from sqlite3 import OperationalError
+
 from backend import analysis_2d
+
+from model import model_2d, model_user
 
 from rq import Queue
 from redis import Redis
+
+from config import my_config
+
+import yaml
+
+# create the models
+model_2d.create_table()
+model_user.create_table()
 
 app = Flask(__name__)
 blueprint = Blueprint('api', __name__)
@@ -22,17 +34,14 @@ api = Api(app=app,
 
 app.register_blueprint(blueprint)
 
-
-app.config['DATA_FOLDER'] = "."
-
-
-mock_file_3d = "mock_data/ballet.json"
-with open(mock_file_3d, 'r') as file:
-    mock_data_3d = json.load(file)
+app.config['VIDEO_JOBS'] = os.path.join(my_config['data_folder'], my_config['analysis_2d_jobs_subfolder'])
 
 
 # todo: content type set to video
 
+"""
+2D SPACE ANALYSIS
+"""
 
 analysis_2d_space = api.namespace('analysis_2d', description='2D Analysis')
 
@@ -60,12 +69,13 @@ class UploadVideo(Resource):
     def post(self):
         args = parsers.upload_parser.parse_args()
         if args['mp4_file'].mimetype == 'video/mp4':
-            destination = os.path.join(app.config.get('DATA_FOLDER'), 'jobs/')
+            destination = app.config.get('VIDEO_JOBS')
             if not os.path.exists(destination):
                 os.makedirs(destination)
             video_id = str(uuid.uuid4())
             mp4_file = '%s%s%s' % (destination, str(video_id),'.mp4')
             args['mp4_file'].save(mp4_file)
+            model_2d.add_video(video_id, 'default')
         else:
             abort(415)
         return {'status': 'success',
@@ -76,20 +86,30 @@ class UploadVideo(Resource):
 @analysis_2d_space.route("/analyse/<string:video_id>")
 class AnalyseVideo(Resource):
     def get(self, video_id):
-        # todo: check if analysis was succesful, return
-        return 202
+        # todo: check if analysis was successful, return
+        if not model_2d.is_started(video_id):
+            return {"message": "2d analysis has not been started yet."
+                               "To start the analysis, send a POST request",
+                    "analysis_url": url_for("analysis_2d_analyse_video", video_id=video_id)}
+        if not model_2d.is_finished(video_id):
+            return {"message": "2d analysis is in progress. please wait",
+                    "analysis_url": url_for("analysis_2d_analyse_video", video_id=video_id)}, 202
+        # todo: return data
+        return 200
 
     def post(self, video_id):
         # todo: check if video was already taken in to the queue
-        q.enqueue(analysis_2d.analyse_2d, video_id)
+        try:
+            model_2d.start_analysis(video_id)
+        except OperationalError:
+            abort(404)
+        result = q.enqueue(analysis_2d.analyse_2d, video_id)
         return 202
 
 
-def do_something_with_file(uploaded_file):
-    return True
-
-
-
+"""
+ANALYSIS 3D OF VIDEO
+"""
 analysis_model_3d = api.model('3D Analysis Model',
                               {
                                   'data': fields.String(required=True,
@@ -114,8 +134,16 @@ class Analysis3DClass(Resource):
     def post(self):
         # todo: send to 3d-pose-baseline
         return {
-            "data": mock_data_3d,
+            "data": "",
         }, 202
+
+
+"""
+USER MANAGEMENT
+"""
+
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)
