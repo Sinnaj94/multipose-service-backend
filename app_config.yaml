@@ -2,6 +2,14 @@ data_folder: "data"
 analysis_2d_jobs_subfolder: "jobs"
 working_dir: "."
 database_file: "model.db"
+# TODO: CHANGE TO A STRONG PASSWORD. VERY IMPORTANT!
+secret_key: "KEEP THIS SAVE AND CHANGE IT PLEASE"
+database_uri: 'sqlite:///db.sqlite'
+
+postgresql:
+  username: "user"
+  # TODO: CHANGE TO A STRONG PASSWORD. VERY IMPORTANT!
+  password: "CHANGETHIS"
 
 openpose:
   # TODO: CHANGE THIS TO YOUR INSTALLATION_DIR

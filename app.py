@@ -12,20 +12,31 @@ from sqlite3 import OperationalError
 
 from backend import analysis_2d
 
-from model import model_2d, model_user
-
 from rq import Queue
 from redis import Redis
 
 from config import my_config
 
-import yaml
+# authentication
+from flask_sqlalchemy import SQLAlchemy
+from flask_httpauth import HTTPBasicAuth
 
-# create the models
-model_2d.create_table()
-model_user.create_table()
-
+# initialization
 app = Flask(__name__)
+
+app.config['SECRET_KEY'] = my_config['secret_key']
+app.config['SQLALCHEMY_DATABASE_URI'] = my_config['database_uri']
+app.config['SQLALCHEMY_COMMIT_ON_TEARDOWN'] = True
+
+app.config['POSTGRESQL_USER'] = my_config['postgresql']['username']
+app.config['POSTGRESQL_PASS'] = my_config['postgresql']['password']
+
+# extensions
+db = SQLAlchemy(app)
+auth = HTTPBasicAuth()
+
+from model import model_user
+
 blueprint = Blueprint('api', __name__)
 api = Api(app=app,
           version="1.0",
@@ -35,7 +46,6 @@ api = Api(app=app,
 app.register_blueprint(blueprint)
 
 app.config['VIDEO_JOBS'] = os.path.join(my_config['data_folder'], my_config['analysis_2d_jobs_subfolder'])
-
 
 # todo: content type set to video
 
@@ -55,6 +65,7 @@ class Analysis2DClass(Resource):
     """
     2D Analysis of Video
     """
+
     # get via id
     def get(self):
         return {
@@ -73,9 +84,9 @@ class UploadVideo(Resource):
             if not os.path.exists(destination):
                 os.makedirs(destination)
             video_id = str(uuid.uuid4())
-            mp4_file = '%s%s%s' % (destination, str(video_id),'.mp4')
+            mp4_file = '%s%s%s' % (destination, str(video_id), '.mp4')
             args['mp4_file'].save(mp4_file)
-            model_2d.add_video(video_id, 'default')
+            # model_2d.add_video(video_id, 'default')
         else:
             abort(415)
         return {'status': 'success',
@@ -87,20 +98,21 @@ class UploadVideo(Resource):
 class AnalyseVideo(Resource):
     def get(self, video_id):
         # todo: check if analysis was successful, return
-        if not model_2d.is_started(video_id):
+        """if not model_2d.is_started(video_id):
             return {"message": "2d analysis has not been started yet."
                                "To start the analysis, send a POST request",
                     "analysis_url": url_for("analysis_2d_analyse_video", video_id=video_id)}
         if not model_2d.is_finished(video_id):
             return {"message": "2d analysis is in progress. please wait",
-                    "analysis_url": url_for("analysis_2d_analyse_video", video_id=video_id)}, 202
+                    "analysis_url": url_for("analysis_2d_analyse_video", video_id=video_id)}, 202"""
         # todo: return data
         return 200
 
     def post(self, video_id):
         # todo: check if video was already taken in to the queue
         try:
-            model_2d.start_analysis(video_id)
+            print("TODO")
+            # model_2d.start_analysis(video_id)
         except OperationalError:
             abort(404)
         result = q.enqueue(analysis_2d.analyse_2d, video_id)
@@ -130,20 +142,35 @@ class Analysis3DClass(Resource):
     """
     3D Analysis of Data
     """
+
     @api.expect(analysis_model_3d)
     def post(self):
         # todo: send to 3d-pose-baseline
         return {
-            "data": "",
-        }, 202
+                   "data": "",
+               }, 202
 
 
 """
 USER MANAGEMENT
 """
 
+user_space = api.namespace('users', description='User management')
 
+user_parser = api.parser()
+user_parser.add_argument('username', type=str, required=True)
+user_parser.add_argument('password', type=str, required=True)
+
+
+@user_space.route("/", endpoint='with-parser')
+class CreateUser(Resource):
+    @api.expect(user_parser)
+    def post(self):
+        args = user_parser.parse_args(strict=True)
+        return model_user.add_user(args['username'], args['password'])
 
 
 if __name__ == '__main__':
+    if not os.path.exists('db.sqlite'):
+        db.create_all()
     app.run(debug=True)

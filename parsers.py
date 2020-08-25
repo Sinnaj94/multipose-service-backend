@@ -8,3 +8,5 @@ upload_parser.add_argument('mp4_file',
                            required=True,
                            help='mp4 File'
                            )
+
+parser = reqparse.RequestParser()
