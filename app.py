@@ -2,7 +2,7 @@
 import os
 
 import time
-from flask import Flask, Blueprint, url_for
+from flask import Flask, Blueprint, url_for, g, jsonify
 from flask_restplus import Api, Resource, fields, abort
 import json
 import uuid
@@ -27,6 +27,7 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = my_config['secret_key']
 app.config['SQLALCHEMY_DATABASE_URI'] = my_config['database_uri']
 app.config['SQLALCHEMY_COMMIT_ON_TEARDOWN'] = True
+app.config['SERVER_NAME'] = "localhost:5000"
 
 app.config['POSTGRESQL_USER'] = my_config['postgresql']['username']
 app.config['POSTGRESQL_PASS'] = my_config['postgresql']['password']
@@ -35,7 +36,7 @@ app.config['POSTGRESQL_PASS'] = my_config['postgresql']['password']
 db = SQLAlchemy(app)
 auth = HTTPBasicAuth()
 
-from model import model_user
+from model import model
 
 blueprint = Blueprint('api', __name__)
 api = Api(app=app,
@@ -53,15 +54,48 @@ app.config['VIDEO_JOBS'] = os.path.join(my_config['data_folder'], my_config['ana
 2D SPACE ANALYSIS
 """
 
-analysis_2d_space = api.namespace('analysis_2d', description='2D Analysis')
-
 # queue building
 redis_conn = Redis()
 q = Queue(connection=redis_conn)
 
+"""
+Auth Space
+"""
 
-@analysis_2d_space.route("/")
-class Analysis2DClass(Resource):
+auth_space = api.namespace('auth', description="Authentication")
+
+
+# source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
+@auth.verify_password
+def verify_password(username_or_token, password):
+    # first try to authenticate by token
+    user = model.User.verify_auth_token(username_or_token)
+    if not user:
+        # try to authenticate with username/password
+        user = model.User.query.filter_by(username=username_or_token).first()
+        if not user or not user.verify_password(password):
+            return False
+    g.user = user
+    return True
+
+
+# source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
+@auth_space.route("/token")
+class GetToken(Resource):
+    @auth.login_required
+    def get(self):
+        token = g.user.generate_auth_token(600)
+        print(g.user)
+        return jsonify({'token': token.decode('ascii'), 'duration': 600})
+
+
+"""
+Jobs Space
+"""
+jobs_space = api.namespace('jobs', description='Jobs')
+
+@jobs_space.route("/")
+class JobsClass(Resource):
     """
     2D Analysis of Video
     """
@@ -73,50 +107,44 @@ class Analysis2DClass(Resource):
         }
 
 
-# todo: build model
-@analysis_2d_space.route("/upload/")
-class UploadVideo(Resource):
+@jobs_space.route("/upload/")
+class UploadJob(Resource):
+    @auth.login_required
     @api.expect(parsers.upload_parser)
     def post(self):
         args = parsers.upload_parser.parse_args()
         if args['mp4_file'].mimetype == 'video/mp4':
+            # todo: Authentication and stuff.
+            id = model.add_job(g.user.id)
             destination = app.config.get('VIDEO_JOBS')
             if not os.path.exists(destination):
                 os.makedirs(destination)
-            video_id = str(uuid.uuid4())
-            mp4_file = '%s%s%s' % (destination, str(video_id), '.mp4')
+            mp4_file = os.path.join(destination, '%s%s' %  (str(id), '.mp4'))
             args['mp4_file'].save(mp4_file)
-            # model_2d.add_video(video_id, 'default')
         else:
             abort(415)
         return {'status': 'success',
-                'analysis_url': url_for("analysis_2d_analyse_video", video_id=video_id),
-                'id': video_id}
+                'analyse_url': url_for("jobs_start_job", video_id=id),
+                'job_id': str(id)}
 
 
-@analysis_2d_space.route("/analyse/<string:video_id>")
-class AnalyseVideo(Resource):
+@jobs_space.route("/start/<uuid:video_id>")
+class StartJob(Resource):
+    @auth.login_required
     def get(self, video_id):
-        # todo: check if analysis was successful, return
-        """if not model_2d.is_started(video_id):
-            return {"message": "2d analysis has not been started yet."
-                               "To start the analysis, send a POST request",
-                    "analysis_url": url_for("analysis_2d_analyse_video", video_id=video_id)}
-        if not model_2d.is_finished(video_id):
-            return {"message": "2d analysis is in progress. please wait",
-                    "analysis_url": url_for("analysis_2d_analyse_video", video_id=video_id)}, 202"""
-        # todo: return data
-        return 200
-
-    def post(self, video_id):
-        # todo: check if video was already taken in to the queue
-        try:
-            print("TODO")
-            # model_2d.start_analysis(video_id)
-        except OperationalError:
-            abort(404)
-        result = q.enqueue(analysis_2d.analyse_2d, video_id)
+        # todo : show status
         return 202
+
+    @auth.login_required
+    def post(self, video_id):
+        return model.start_job(video_id)
+
+
+@jobs_space.route("/videos/")
+class GetVideos(Resource):
+    @auth.login_required
+    def get(self):
+        return model.get_jobs(g.user.id)
 
 
 """
@@ -158,19 +186,37 @@ USER MANAGEMENT
 user_space = api.namespace('users', description='User management')
 
 user_parser = api.parser()
-user_parser.add_argument('username', type=str, required=True)
-user_parser.add_argument('password', type=str, required=True)
+user_parser.add_argument('username', type=str, required=True, location='form')
+user_parser.add_argument('password', type=str, required=True, location='form')
 
 
+# source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
 @user_space.route("/", endpoint='with-parser')
 class CreateUser(Resource):
     @api.expect(user_parser)
     def post(self):
         args = user_parser.parse_args(strict=True)
-        return model_user.add_user(args['username'], args['password'])
+        return model.add_user(args['username'], args['password'])
+
+
+# source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
+@user_space.route("/<uuid:id>")
+class GetUser(Resource):
+    def get(self, id):
+        return model.get_user(id)
 
 
 if __name__ == '__main__':
     if not os.path.exists('db.sqlite'):
         db.create_all()
     app.run(debug=True)
+
+
+# with app.app_context():
+#     urlvars = False  # Build query strings in URLs
+#     swagger = True  # Export Swagger specifications
+#     data = api.as_postman(urlvars=urlvars, swagger=swagger)
+#     with open("postman_export.json", 'w') as file:
+#         json.dump(data, file)
+#     file.close()
+

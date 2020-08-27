@@ -4,9 +4,10 @@ working_dir: "."
 database_file: "model.db"
 # TODO: CHANGE TO A STRONG PASSWORD. VERY IMPORTANT!
 secret_key: "KEEP THIS SAVE AND CHANGE IT PLEASE"
-database_uri: 'sqlite:///db.sqlite'
+database_uri: 'postgresql:///mocap'
 
 postgresql:
+  database_url: "postgresql:///mocap"
   username: "user"
   # TODO: CHANGE TO A STRONG PASSWORD. VERY IMPORTANT!
   password: "CHANGETHIS"
