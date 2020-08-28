@@ -1,24 +1,29 @@
 import uuid
+from datetime import datetime
+import enum
 
 import jwt
 import time
 import werkzeug
 from flask import jsonify
-from sqlalchemy import ForeignKey, event
+from sqlalchemy import ForeignKey, event, desc, asc, or_
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.orm import relationship, backref
+from sqlalchemy.orm import relationship
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import generate_password_hash, check_password_hash
+from marshmallow_enum import EnumField
 
 from app import db, app
 
 
 # source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
-class User(db.Model):
+class Users(db.Model):
     __tablename__ = 'users'
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
     username = db.Column(db.String(32), index=True)
     password_hash = db.Column(db.String(128))
+    posts = relationship("Posts", backref="user", lazy='dynamic', cascade="all, delete-orphan")
+    result_children = relationship("Results", backref="users", lazy='dynamic', cascade="all, delete-orphan")
 
     def hash_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -39,65 +44,90 @@ class User(db.Model):
         except:
             return
         print(str(data['id']))
-        return User.query.get(data['id'])
+        return Users.query.get(data['id'])
 
 
+class Posts(db.Model):
+    __tablename__ = 'posts'
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
+    parent_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    public = db.Column(db.BOOLEAN, default=True)
+    title = db.Column(db.String(64))
+
+
+# parent
 class Jobs(db.Model):
     __tablename_ = 'jobs'
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
-    user_id = db.Column(UUID(as_uuid=True), nullable=False)
-    child = relationship("Analysis", backref="jobs", lazy='dynamic', cascade="all, delete-orphan")
-    # 0 = nothing
-    # 1 = 2d
-    # 2 = 3d
-    stage = db.Column(db.Integer, default=0)
-    # 0 = idle
-    # 1 = pending
-    # 2 = running
-    # 3 = finished
-    # -1 = failure
-    status = db.Column(db.Integer, default=0)
-    action_required = db.Column(db.Boolean, default=False)
+    result_children = relationship("Results", backref="jobs", lazy='dynamic', cascade="all, delete-orphan")
+    user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    date_updated = db.Column(db.TIMESTAMP, default=datetime.now())
 
     def serialize(self):
         return {
             "id": str(self.id),
-            "status": self.status,
-            "stage": self.stage,
-            "action_required": self.action_required
+            "user_id": str(self.user_id),
+            "date_updated": self.date_updated
         }
 
 
+class ResultCode(enum.Enum):
+    success = 1
+    waiting = 0
+    failure = -1
+
+
+class ResultType(enum.Enum):
+    dimension_2d = 0
+    dimension_3d = 1
+
+
+class Results(db.Model):
+    __tablename_ = 'results'
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
+    job_id = db.Column(UUID(as_uuid=True), ForeignKey('jobs.id'))
+    user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    result_code = db.Column(db.Enum(ResultCode), nullable=False, default=ResultCode.waiting)
+    data = db.Column(db.String)
+    date_updated = db.Column(db.TIMESTAMP, default=datetime.now(), nullable=False)
+    num_people = db.Column(db.Integer)
+    person_index = db.Column(db.Integer)
+    result_type = db.Column(db.Enum(ResultType), nullable=False)
+
+    def serialize(self):
+        var = {
+            "id": str(self.id),
+            "job_id": str(self.job_id),
+            "user_id": str(self.user_id),
+            "result_code": str(self.result_code),
+            "result_type": str(self.result_type),
+            "person_id": self.person_index,
+            "data": self.data
+        }
+        return var
+
+
+# analysis_children
 class Analysis(db.Model):
     __tablename_ = 'analysis'
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
     parent_id = db.Column(UUID(as_uuid=True), ForeignKey('jobs.id'))
-    analysis_type = db.Column(db.Integer, nullable=False)
-    cancel = db.Column(db.BOOLEAN, default=False)
-    result_code = db.Column(db.Integer, default=0)
-    output_data = db.Column(db.String)
+    analysis_type = db.Column(db.String(2), nullable=False)
+    date_added = db.Column(db.TIMESTAMP, default=datetime.now())
     __mapper_args__ = {'polymorphic_on': analysis_type}
 
 
 class Analysis2D(Analysis):
-    __mapper_args__ = {'polymorphic_identity': 1}
+    __mapper_args__ = {'polymorphic_identity': "2d"}
     num_people = db.Column(db.Integer, default=0)
 
 
 class Analysis3D(Analysis):
-    __mapper_args__ = {'polymorphic_identity': 2}
-    person_id = db.Column(db.Integer, default=0)
+    __mapper_args__ = {'polymorphic_identity': "3d"}
+    person_id = db.Column(db.Integer)
 
 
 db.create_all()
-
-
-@event.listens_for(Jobs.child, "append")
-@event.listens_for(Jobs.child, 'remove')
-def receive_append_or_remove(target, value, initiator):
-    print("Hello actually")
-    target.stage = value.analysis_type
-
 
 """methods"""
 
@@ -105,6 +135,11 @@ def receive_append_or_remove(target, value, initiator):
 class JobDoesNotExist(HTTPException):
     code = 404
     description = "Job does not exist."
+
+
+class JobFailedException(HTTPException):
+    code = 404
+    description = "Job failed."
 
 
 class PersonIDRequired(HTTPException):
@@ -121,7 +156,7 @@ def retrieve_job(job_id):
 
 def get_job(job_id):
     job = retrieve_job(job_id)
-    return job.serialize()
+    return job
 
 
 def add_job(user_id):
@@ -133,47 +168,92 @@ def add_job(user_id):
 
 
 def get_jobs(user_id):
-    videos = db.session.query(Jobs).filter_by(user_id=user_id).all()
-    return [a.serialize() for a in videos]
+    jobs = db.session.query(Jobs).filter_by(user_id=user_id)
+    return jobs
 
 
-def start_job(my_id, person_id=None):
-    job = retrieve_job(my_id)
-    # first: check if it is idle actually
-    if job.status != 0:
-        return job
-    if job.stage == 0:
-        analysis_2d = Analysis2D(parent_id=my_id)
-        db.session.add(analysis_2d)
-        db.session.commit()
-        return {"status": "2d job started"}
-    elif job.stage == 1:
-        if job.action_required:
-            if person_id is None:
-                raise PersonIDRequired()
-        analysis_3d = Analysis3D(parent_id=my_id, person_id=person_id)
-        db.session.add(analysis_3d)
-        db.session.commit()
-    elif job.stage == 2:
-        return job.serialize()
+def get_results_by_user_id(user_id):
+    # todo
+    jobs = db.session.query(Results).filter_by(user_id=user_id)
+    return jobs
+
+
+def get_results_by_job_id(job_id):
+    results = db.session.query(Results).filter_by(job_id=job_id)
+    return results
+
+
+def get_jobs_by_user_id(user_id):
+    jobs = db.session.query(Jobs).filter_by(user_id=user_id)
+    return jobs
+
+
+def serialize_array(ar):
+    return [ob.serialize() for ob in ar]
+
+
+def result_exists_for_job_id(job_id, result_type, person_id=None):
+    return db.session.query(Results).filter_by(job_id=job_id, result_type=result_type, person_index=person_id)
+
+
+class Result2DDoesNotExist(HTTPException):
+    code = 404
+    description = "Result in 2D does not exist yet."
+
+
+class Result2DFailed(HTTPException):
+    code = 400
+    description = "2D result pending or failed."
+
+
+def start_job(job_id, dimension=ResultType.dimension_2d, person_id=None):
+    job = retrieve_job(job_id)
+
+    # a result should never exist twice!
+    results = result_exists_for_job_id(job_id, dimension, person_id)
+    if results.count() > 0:
+        return results.first()
+    # if 3d result is requested
+    if dimension is ResultType.dimension_3d:
+        # 2d result has to exist!
+        results_2d = result_exists_for_job_id(job_id, dimension)
+        if results_2d.count() == 0:
+            raise Result2DDoesNotExist()
+        results_2d_waiting_or_failed = results_2d.filter(or_(Results.result_code == ResultCode.failure,
+                                                             Results.result_code == ResultCode.waiting)).first()
+        if results_2d_waiting_or_failed:
+            if results_2d_waiting_or_failed.result_code == ResultCode.failure:
+                raise Result2DFailed()
+            else:
+                raise Result2DFailed("2d result is pending")
+
+    result = Results(job_id=job_id,
+                     user_id=job.user_id,
+                     result_type=dimension,
+                     person_index=person_id,
+                     result_code=ResultCode.waiting
+                     )
+    db.session.add(result)
+    db.session.commit()
+    return result
 
 
 class UserExists(werkzeug.exceptions.HTTPException):
     code = 409
-    description = "User already exists."
+    description = "Users already exists."
 
 
 class UserDoesNotExist(werkzeug.exceptions.HTTPException):
     code = 404
-    description = "User does not exist."
+    description = "Users does not exist."
 
 
 def add_user(username, password):
-    existing = db.session.query(User).filter_by(username=username).first()
+    existing = db.session.query(Users).filter_by(username=username).first()
     if existing is not None:
         raise UserExists()
 
-    user = User(username=username)
+    user = Users(username=username)
     user.hash_password(password)
     db.session.add(user)
     db.session.commit()
@@ -182,7 +262,24 @@ def add_user(username, password):
 
 
 def get_user(id):
-    user = User.query.get(id)
+    user = Users.query.get(id)
     if not user:
         raise UserDoesNotExist()
     return jsonify({'username': user.username})
+
+
+def get_result_by_id(results_id):
+    return Results.get(results_id)
+
+
+def filter_results(user_id, args):
+    results = db.session.query(Results).filter_by(user_id=user_id)
+    if args['job_id']:
+        results = results.filter_by(job_id=args['job_id'])
+    if args['result_code']:
+        results = results.filter_by(result_code=ResultCode(args['result_code']))
+    if args['result_type']:
+        results = results.filter_by(result_code=ResultType(args['result_type']))
+    if args['person_id']:
+        results = results.filter_by(person_id=args['person_id'])
+    return results
