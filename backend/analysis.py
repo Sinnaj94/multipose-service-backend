@@ -3,7 +3,7 @@ from flask import jsonify
 from backend import analysis_base
 import time
 import json
-from app import app, enqueue_analysis, db
+from app import app, notify_analysis, db
 from model import model
 
 mock_file_3d = "mock_data/ballet.json"
@@ -26,4 +26,4 @@ def analyse(idle):
         # todo: fail
         idle.status = -1
         db.session.commit()
-    enqueue_analysis()
+    notify_analysis()

@@ -7,6 +7,9 @@ from flask_restplus import Api, Resource, fields, abort
 import json
 import uuid
 import logging
+
+from werkzeug.exceptions import HTTPException
+
 import parsers
 
 from sqlite3 import OperationalError
@@ -39,7 +42,6 @@ auth = HTTPBasicAuth()
 
 from model import model
 
-
 blueprint = Blueprint('api', __name__)
 api = Api(app=app,
           version="1.0",
@@ -50,11 +52,9 @@ app.register_blueprint(blueprint)
 
 app.config['VIDEO_JOBS'] = os.path.join(my_config['data_folder'], my_config['analysis_2d_jobs_subfolder'])
 
-
 # queue building
 redis_conn = Redis()
 q = Queue(connection=redis_conn)
-
 
 """
 USER MANAGEMENT
@@ -71,6 +71,8 @@ user_parser.add_argument('password', type=str, required=True, location='form')
 @user_space.route("/", endpoint='with-parser')
 class CreateUser(Resource):
     @api.expect(user_parser)
+    @api.response(409, 'A user with given username already exists')
+    @api.response(200, 'User successfully created')
     def post(self):
         args = user_parser.parse_args(strict=True)
         return model.add_user(args['username'], args['password'])
@@ -79,6 +81,8 @@ class CreateUser(Resource):
 # source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
 @user_space.route("/<uuid:id>")
 class GetUser(Resource):
+    @api.response(404, 'The user with given id does not exist')
+    @api.response(200, 'Return user with given id')
     def get(self, id):
         return model.get_user(id)
 
@@ -108,10 +112,13 @@ def verify_password(username_or_token, password):
 @auth_space.route("/token")
 class GetToken(Resource):
     @auth.login_required
+    @api.response(401, 'The user is not permitted to do this action')
+    @api.response(200, 'Return token which is valid for 600 seconds')
     def get(self):
         token = g.user.generate_auth_token(600)
         print(g.user)
         return jsonify({'token': token.decode('ascii'), 'duration': 600})
+
 
 """
 Jobs Space
@@ -124,32 +131,19 @@ class Jobs(Resource):
     """
     Job status
     """
+
     # get via id
     @auth.login_required
+    @api.response(401, 'The user is not permitted to do this action')
+    @api.response(200, 'Return all jobs belonging to the authorized user')
     def get(self):
         return model.serialize_array(model.get_jobs_by_user_id(g.user.id))
 
-
-@jobs_space.route("/<uuid:job_id>")
-class Job(Resource):
-    """
-    Job status
-    """
-    # get via id
-    @auth.login_required
-    def get(self, job_id):
-        return model.get_job(job_id).serialize()
-
-
-def start_job(job_id):
-    result = model.start_job(job_id)
-    return result.serialize()
-
-
-@jobs_space.route("/add/")
-class AddJob(Resource):
     @auth.login_required
     @api.expect(parsers.upload_parser)
+    @api.doc('get_something')
+    @api.response(401, 'The user is not permitted to do this action')
+    @api.response(200, 'Return the new job')
     def post(self):
         id = None
         args = parsers.upload_parser.parse_args()
@@ -159,7 +153,7 @@ class AddJob(Resource):
             destination = app.config.get('VIDEO_JOBS')
             if not os.path.exists(destination):
                 os.makedirs(destination)
-            mp4_file = os.path.join(destination, '%s%s' %  (str(id), '.mp4'))
+            mp4_file = os.path.join(destination, '%s%s' % (str(id), '.mp4'))
             args['mp4_file'].save(mp4_file)
         else:
             abort(415)
@@ -168,18 +162,42 @@ class AddJob(Resource):
         return {'status': 'posted'}
 
 
+@jobs_space.route("/<uuid:job_id>")
+@api.response(401, 'The user is not permitted to do this action')
+class Job(Resource):
+    """
+    Job status
+    """
+
+    # get via id
+    @auth.login_required
+    @api.response(404, 'A job with the given id was not found')
+    @api.response(401, 'The user is not permitted to do this action')
+    @api.response(200, 'Return the new job')
+    def get(self, job_id):
+        return model.get_job(job_id).serialize()
+
+
+def start_job(job_id, **kwargs):
+    result = model.start_job(job_id, **kwargs)
+    return result.serialize()
+
+
 @jobs_space.route("/start/<uuid:job_id>")
 class StartJob(Resource):
     @auth.login_required
+    @api.response(400, 'Bad request')
+    @api.response(404, 'A job with the given id was not found')
+    @api.response(401, 'The user is not permitted to do this action')
+    @api.response(200, 'Return the new result object')
+    @api.response(409, 'The result already exists / is pending for the given id')
+    @api.response(503, '2D Result does not exist, so 3d analysis can not be started yet')
+    @api.expect(parsers.job_start_parser)
     def post(self, job_id):
-        return start_job(job_id)
-
-
-@jobs_space.route("/")
-class GetVideos(Resource):
-    @auth.login_required
-    def get(self):
-        return model.get_jobs(g.user.id)
+        args = parsers.job_start_parser.parse_args()
+        if args['result_type'] == 0 and args['person_id'] is not None:
+            abort(400, "Person id must be null when result_type is set to 0")
+        return start_job(job_id, **args)
 
 
 """
@@ -192,6 +210,9 @@ results_space = api.namespace('results', description='Results')
 @results_space.route("/<uuid:result_id>")
 class Result(Resource):
     @auth.login_required
+    @api.response(404, 'A result with the given id was not found')
+    @api.response(200, 'Return the new job')
+    @api.response(401, 'The user is not permitted to do this action')
     def get(self, result_id):
         return model.get_result_by_id(result_id).serialize()
 
@@ -199,10 +220,13 @@ class Result(Resource):
 @results_space.route("/")
 class Results(Resource):
     @auth.login_required
+    @api.response(200, 'Return all the results that match to the given parameters')
+    @api.response(401, 'The user is not permitted to do this action')
     @api.expect(parsers.results_parser)
     def get(self):
         args = parsers.results_parser.parse_args()
         return model.serialize_array(model.filter_results(g.user.id, args))
+
 
 """
 Posts space
@@ -210,33 +234,24 @@ Posts space
 
 posts_space = api.namespace('posts', description='Posts feed')
 
+
 # return all public posts
 @posts_space.route("/")
 class Posts(Resource):
+    @api.response(200, 'Return the first 100 public posts')
     def get(self):
         return model.serialize_array(model.get_all_public_posts())
 
 
-
-def enqueue_analysis():
+def notify_analysis():
     return
-    #idle = model.get_idle()
-    #if idle:
+    # idle = model.get_idle()
+    # if idle:
     #    q.enqueue(analysis.analyse, idle)
 
 
 if __name__ == '__main__':
     if not os.path.exists('db.sqlite'):
         db.create_all()
-    enqueue_analysis()
+    notify_analysis()
     app.run(debug=True)
-
-
-# with app.app_context():
-#     urlvars = False  # Build query strings in URLs
-#     swagger = True  # Export Swagger specifications
-#     data = api.as_postman(urlvars=urlvars, swagger=swagger)
-#     with open("postman_export.json", 'w') as file:
-#         json.dump(data, file)
-#     file.close()
-

@@ -18,3 +18,7 @@ results_parser.add_argument('result_code', type=int, help='Result Code: -1 = fai
 results_parser.add_argument('result_type', type=int, help='Result Type: 0 = 2d, 1 = 3d')
 results_parser.add_argument('job_id', help='Job id of the given result')
 results_parser.add_argument('person_id', type=int, help='Result with person index')
+
+job_start_parser = reqparse.RequestParser()
+job_start_parser.add_argument('result_type', type=int, help='Result Type: 0 = 2d, 1 = 3d')
+job_start_parser.add_argument('person_id', type=int, help='Result with person index')

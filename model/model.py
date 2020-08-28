@@ -15,7 +15,9 @@ from marshmallow_enum import EnumField
 
 from app import db, app
 
-
+"""
+DATABASE MODEL
+"""
 # source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
 class Users(db.Model):
     __tablename__ = 'users'
@@ -118,6 +120,18 @@ class Results(db.Model):
 
 db.create_all()
 
+"""
+EVENT LISTENERS
+"""
+
+
+@db.event.listens_for(Results, "after_insert")
+def notify_observers(mapper, connection, target):
+    app.logger.debug("New waiting result was inserted. Notifying app.")
+    #notify_analysis()
+
+
+
 """methods"""
 
 
@@ -185,9 +199,9 @@ def result_exists_for_job_id(job_id, result_type, person_id=None):
     return db.session.query(Results).filter_by(job_id=job_id, result_type=result_type, person_index=person_id)
 
 
-class ResultDoesNotExist(HTTPException):
-    code = 404
-    description = "Result does not exist."
+class ResultDoesNotExistYet(HTTPException):
+    code = 503
+    description = "2D Result does not exist, so 3d analysis can not be started yet"
 
 
 class Result2DFailed(HTTPException):
@@ -195,19 +209,31 @@ class Result2DFailed(HTTPException):
     description = "2D result pending or failed."
 
 
-def start_job(job_id, dimension=ResultType.dimension_2d, person_id=None):
+class ResultExists(HTTPException):
+    code = 409
+    description = "A result for the given job already exists or has been queued."
+
+
+def start_job(job_id, **kwargs):
     job = retrieve_job(job_id)
+    result_type = ResultType.dimension_2d
+    if kwargs['result_type']:
+        result_type = ResultType(kwargs['result_type'])
+    person_id = kwargs['person_id']
+    # person id can be ignored.
+    if result_type == ResultType.dimension_2d:
+        person_id = None
 
     # a result should never exist twice!
-    results = result_exists_for_job_id(job_id, dimension, person_id)
+    results = result_exists_for_job_id(job_id, result_type, person_id)
     if results.count() > 0:
-        return results.first()
+        raise ResultExists()
     # if 3d result is requested
-    if dimension is ResultType.dimension_3d:
+    if result_type is ResultType.dimension_3d:
         # 2d result has to exist!
-        results_2d = result_exists_for_job_id(job_id, dimension)
+        results_2d = result_exists_for_job_id(job_id, result_type)
         if results_2d.count() == 0:
-            raise ResultDoesNotExist()
+            raise ResultDoesNotExistYet()
         results_2d_waiting_or_failed = results_2d.filter(or_(Results.result_code == ResultCode.failure,
                                                              Results.result_code == ResultCode.waiting)).first()
         if results_2d_waiting_or_failed:
@@ -218,7 +244,7 @@ def start_job(job_id, dimension=ResultType.dimension_2d, person_id=None):
 
     result = Results(job_id=job_id,
                      user_id=job.user_id,
-                     result_type=dimension,
+                     result_type=result_type,
                      person_index=person_id,
                      result_code=ResultCode.waiting
                      )
@@ -232,7 +258,7 @@ class UserExists(werkzeug.exceptions.HTTPException):
     description = "Users already exists."
 
 
-class UserDoesNotExist(werkzeug.exceptions.HTTPException):
+class UserDoesNotExist(HTTPException):
     code = 404
     description = "Users does not exist."
 
@@ -260,7 +286,7 @@ def get_user(id):
 def get_result_by_id(results_id):
     result = Results.query.get(results_id)
     if result is None:
-        raise ResultDoesNotExist()
+        raise ResultDoesNotExistYet()
     return result
 
 
