@@ -52,8 +52,16 @@ class Posts(db.Model):
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
     user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
     public = db.Column(db.BOOLEAN, default=True)
-    data = db.Column(db.String)
-    title = db.Column(db.String(64))
+    data = db.Column(db.String, nullable=False)
+    date = db.Column(db.TIMESTAMP, nullable=False, default=datetime.now())
+    title = db.Column(db.String(64), nullable=False)
+
+    def serialize(self):
+        return {
+            "title": self.title,
+            "date": str(self.date),
+            "username": get_user(self.user_id).username
+        }
 
 
 # parent
@@ -267,3 +275,7 @@ def filter_results(user_id, args):
     if args['person_id']:
         results = results.filter_by(person_index=args['person_id'])
     return results
+
+
+def get_all_public_posts():
+    return db.session.query(Posts).filter_by(public=True).order_by(desc(Posts.date)).limit(100)

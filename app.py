@@ -204,6 +204,19 @@ class Results(Resource):
         args = parsers.results_parser.parse_args()
         return model.serialize_array(model.filter_results(g.user.id, args))
 
+"""
+Posts space
+"""
+
+posts_space = api.namespace('posts', description='Posts feed')
+
+# return all public posts
+@posts_space.route("/")
+class Posts(Resource):
+    def get(self):
+        return model.serialize_array(model.get_all_public_posts())
+
+
 
 def enqueue_analysis():
     return
