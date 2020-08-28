@@ -50,8 +50,9 @@ class Users(db.Model):
 class Posts(db.Model):
     __tablename__ = 'posts'
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
-    parent_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
     public = db.Column(db.BOOLEAN, default=True)
+    data = db.Column(db.String)
     title = db.Column(db.String(64))
 
 
@@ -67,7 +68,7 @@ class Jobs(db.Model):
         return {
             "id": str(self.id),
             "user_id": str(self.user_id),
-            "date_updated": self.date_updated
+            "date_updated": str(self.date_updated)
         }
 
 
@@ -105,26 +106,6 @@ class Results(db.Model):
             "data": self.data
         }
         return var
-
-
-# analysis_children
-class Analysis(db.Model):
-    __tablename_ = 'analysis'
-    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
-    parent_id = db.Column(UUID(as_uuid=True), ForeignKey('jobs.id'))
-    analysis_type = db.Column(db.String(2), nullable=False)
-    date_added = db.Column(db.TIMESTAMP, default=datetime.now())
-    __mapper_args__ = {'polymorphic_on': analysis_type}
-
-
-class Analysis2D(Analysis):
-    __mapper_args__ = {'polymorphic_identity': "2d"}
-    num_people = db.Column(db.Integer, default=0)
-
-
-class Analysis3D(Analysis):
-    __mapper_args__ = {'polymorphic_identity': "3d"}
-    person_id = db.Column(db.Integer)
 
 
 db.create_all()
@@ -196,9 +177,9 @@ def result_exists_for_job_id(job_id, result_type, person_id=None):
     return db.session.query(Results).filter_by(job_id=job_id, result_type=result_type, person_index=person_id)
 
 
-class Result2DDoesNotExist(HTTPException):
+class ResultDoesNotExist(HTTPException):
     code = 404
-    description = "Result in 2D does not exist yet."
+    description = "Result does not exist."
 
 
 class Result2DFailed(HTTPException):
@@ -218,7 +199,7 @@ def start_job(job_id, dimension=ResultType.dimension_2d, person_id=None):
         # 2d result has to exist!
         results_2d = result_exists_for_job_id(job_id, dimension)
         if results_2d.count() == 0:
-            raise Result2DDoesNotExist()
+            raise ResultDoesNotExist()
         results_2d_waiting_or_failed = results_2d.filter(or_(Results.result_code == ResultCode.failure,
                                                              Results.result_code == ResultCode.waiting)).first()
         if results_2d_waiting_or_failed:
@@ -269,7 +250,10 @@ def get_user(id):
 
 
 def get_result_by_id(results_id):
-    return Results.get(results_id)
+    result = Results.query.get(results_id)
+    if result is None:
+        raise ResultDoesNotExist()
+    return result
 
 
 def filter_results(user_id, args):
@@ -281,5 +265,5 @@ def filter_results(user_id, args):
     if args['result_type']:
         results = results.filter_by(result_code=ResultType(args['result_type']))
     if args['person_id']:
-        results = results.filter_by(person_id=args['person_id'])
+        results = results.filter_by(person_index=args['person_id'])
     return results

@@ -50,15 +50,38 @@ app.register_blueprint(blueprint)
 
 app.config['VIDEO_JOBS'] = os.path.join(my_config['data_folder'], my_config['analysis_2d_jobs_subfolder'])
 
-# todo: content type set to video
-
-"""
-2D SPACE ANALYSIS
-"""
 
 # queue building
 redis_conn = Redis()
 q = Queue(connection=redis_conn)
+
+
+"""
+USER MANAGEMENT
+"""
+
+user_space = api.namespace('users', description='Users management')
+
+user_parser = api.parser()
+user_parser.add_argument('username', type=str, required=True, location='form')
+user_parser.add_argument('password', type=str, required=True, location='form')
+
+
+# source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
+@user_space.route("/", endpoint='with-parser')
+class CreateUser(Resource):
+    @api.expect(user_parser)
+    def post(self):
+        args = user_parser.parse_args(strict=True)
+        return model.add_user(args['username'], args['password'])
+
+
+# source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
+@user_space.route("/<uuid:id>")
+class GetUser(Resource):
+    def get(self, id):
+        return model.get_user(id)
+
 
 """
 Auth Space
@@ -91,27 +114,13 @@ class GetToken(Resource):
         return jsonify({'token': token.decode('ascii'), 'duration': 600})
 
 """
-Results Space
-"""
-
-results_space = api.namespace('results', description='Results')
-
-
-@results_space.route("/")
-class Results(Resource):
-    @auth.login_required
-    @api.expect(parsers.results_parser)
-    def get(self):
-        args = parsers.results_parser.parse_args()
-        return model.serialize_array(model.filter_results(g.user.id, args))
-"""
 Jobs Space
 """
 jobs_space = api.namespace('jobs', description='Jobs')
 
 
 @jobs_space.route("/")
-class JobsClass(Resource):
+class Jobs(Resource):
     """
     Job status
     """
@@ -119,6 +128,17 @@ class JobsClass(Resource):
     @auth.login_required
     def get(self):
         return model.serialize_array(model.get_jobs_by_user_id(g.user.id))
+
+
+@jobs_space.route("/<uuid:job_id>")
+class Job(Resource):
+    """
+    Job status
+    """
+    # get via id
+    @auth.login_required
+    def get(self, job_id):
+        return model.get_job(job_id).serialize()
 
 
 def start_job(job_id):
@@ -163,62 +183,26 @@ class GetVideos(Resource):
 
 
 """
-ANALYSIS 3D OF VIDEO
-"""
-analysis_model_3d = api.model('3D Results Model',
-                              {
-                                  'data': fields.String(required=True,
-                                                        description="2D analysis data",
-                                                        help="2D Posing to be analysed in 3D.")
-                              },
-                              {
-                                  'person_id': fields.Integer(required=False,
-                                                              description="Person ID",
-                                                              help="Give an ID")
-                              })
-
-analysis_3d_space = api.namespace('analysis_3d', description='3D Results')
-
-
-@analysis_3d_space.route("/")
-class Analysis3DClass(Resource):
-    """
-    3D Results of Data
-    """
-
-    @api.expect(analysis_model_3d)
-    def post(self):
-        # todo: send to 3d-pose-baseline
-        return {
-                   "data": "",
-               }, 202
-
-
-"""
-USER MANAGEMENT
+Results Space
 """
 
-user_space = api.namespace('users', description='Users management')
-
-user_parser = api.parser()
-user_parser.add_argument('username', type=str, required=True, location='form')
-user_parser.add_argument('password', type=str, required=True, location='form')
+results_space = api.namespace('results', description='Results')
 
 
-# source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
-@user_space.route("/", endpoint='with-parser')
-class CreateUser(Resource):
-    @api.expect(user_parser)
-    def post(self):
-        args = user_parser.parse_args(strict=True)
-        return model.add_user(args['username'], args['password'])
+@results_space.route("/<uuid:result_id>")
+class Result(Resource):
+    @auth.login_required
+    def get(self, result_id):
+        return model.get_result_by_id(result_id).serialize()
 
 
-# source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
-@user_space.route("/<uuid:id>")
-class GetUser(Resource):
-    def get(self, id):
-        return model.get_user(id)
+@results_space.route("/")
+class Results(Resource):
+    @auth.login_required
+    @api.expect(parsers.results_parser)
+    def get(self):
+        args = parsers.results_parser.parse_args()
+        return model.serialize_array(model.filter_results(g.user.id, args))
 
 
 def enqueue_analysis():
