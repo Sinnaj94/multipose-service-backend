@@ -305,3 +305,7 @@ def filter_results(user_id, args):
 
 def get_all_public_posts():
     return db.session.query(Posts).filter_by(public=True).order_by(desc(Posts.date)).limit(100)
+
+
+def get_pending_results():
+    return db.session.query(Results).filter_by(result_code=ResultCode.waiting).order_by(asc(Results.date_updated))

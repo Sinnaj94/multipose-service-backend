@@ -31,7 +31,7 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = my_config['secret_key']
 app.config['SQLALCHEMY_DATABASE_URI'] = my_config['database_uri']
 app.config['SQLALCHEMY_COMMIT_ON_TEARDOWN'] = True
-app.config['SERVER_NAME'] = "localhost:5000"
+app.config['SERVER_NAME'] = "*:8080"
 
 app.config['POSTGRESQL_USER'] = my_config['postgresql']['username']
 app.config['POSTGRESQL_PASS'] = my_config['postgresql']['password']
@@ -55,6 +55,22 @@ app.config['VIDEO_JOBS'] = os.path.join(my_config['data_folder'], my_config['ana
 # queue building
 redis_conn = Redis()
 q = Queue(connection=redis_conn)
+
+"""
+Status
+"""
+
+status_space = api.namespace('status', description='Get the version status of the api')
+
+@status_space.route("/")
+class Status(Resource):
+    def get(self):
+        return {
+            'version': api.version,
+            'title': api.title,
+            'description': api.description,
+            'id': 'motion_capturing_api'
+        }
 
 """
 USER MANAGEMENT
@@ -244,14 +260,17 @@ class Posts(Resource):
 
 
 def notify_analysis():
-    return
-    # idle = model.get_idle()
-    # if idle:
-    #    q.enqueue(analysis.analyse, idle)
+    mdl = model.get_pending_results().first()
+    # send to analysis class as json
+    if mdl is not None:
+        print("yeah")
+        test = q.enqueue(analysis.analyse, mdl.id)
+    else:
+        print("Waiting queue seems to be empty.")
 
 
 if __name__ == '__main__':
     if not os.path.exists('db.sqlite'):
         db.create_all()
     notify_analysis()
-    app.run(debug=True)
+    app.run(debug=False, host='0.0.0.0')
