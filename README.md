@@ -9,6 +9,11 @@ You will need [python](https://python.org), [pip](https://pypi.org/project/pip/)
 as well as [redis](https://redis.io/) installed on your machine.
 `python` is the programming language of the API, `pip` is the packet manager
 of python and `redis` is used for storing temporal data.
+
+It is recommended to install [docker](https://www.docker.com/) on your machine, as it
+seperates the program in a container and makes it better seperable from
+the system.
+
 ### Installation
 First you should create a virtualenvironment for python.
 A virtualenvironment is an encapsulated python environment in which

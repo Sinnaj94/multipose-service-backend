@@ -1,6 +1,6 @@
 import time
 import json
-from project.app import notify_analysis, db
+import project.app as app
 from project.model import model
 from project.model.model import ResultType, ResultCode
 
@@ -19,7 +19,7 @@ def analyse(result_id):
     elif ob.result_type == ResultType.dimension_3d:
         res = three_d_baseline_analysis(ob)
     print("Analysis of %s finished." % result_id)
-    notify_analysis()
+    app.notify_analysis()
 
 
 def open_pose_analysis(mdl):
@@ -27,7 +27,7 @@ def open_pose_analysis(mdl):
     time.sleep(10)
     #mdl.result_code = ResultCode.success
     mdl.result_code = ResultCode.success
-    db.session.commit()
+    app.db.session.commit()
     return True
 
 
@@ -36,5 +36,5 @@ def three_d_baseline_analysis(mdl):
     time.sleep(10)
     #mdl.result_code = ResultCode.success
     mdl.result_code = ResultCode.success
-    db.session.commit()
+    #db.session.commit()
     return True

@@ -6,13 +6,17 @@ import jwt
 import time
 import werkzeug
 from flask import jsonify
+from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import ForeignKey, desc, asc, or_
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import generate_password_hash, check_password_hash
 
-from project.app import db, app
+from project.app import app
+
+db = SQLAlchemy(app)
+
 
 """
 DATABASE MODEL

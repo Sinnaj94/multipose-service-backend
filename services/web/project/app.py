@@ -2,11 +2,10 @@
 import os
 
 from flask import Flask, Blueprint, g, jsonify
+from flask.cli import FlaskGroup
 from flask_restplus import Api, Resource, abort
 
 from project import parsers
-
-from project.backend import analysis
 
 from rq import Queue
 from redis import Redis
@@ -23,16 +22,14 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = my_config['secret_key']
 app.config['SQLALCHEMY_DATABASE_URI'] = my_config['database_uri']
 app.config['SQLALCHEMY_COMMIT_ON_TEARDOWN'] = True
-app.config['SERVER_NAME'] = "*:8080"
 
 app.config['POSTGRESQL_USER'] = my_config['postgresql']['username']
 app.config['POSTGRESQL_PASS'] = my_config['postgresql']['password']
 
-# extensions
-db = SQLAlchemy(app)
-auth = HTTPBasicAuth()
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-from project.model import model
+# extensions
+auth = HTTPBasicAuth()
 
 blueprint = Blueprint('api', __name__)
 api = Api(app=app,
@@ -47,6 +44,10 @@ app.config['VIDEO_JOBS'] = os.path.join(my_config['data_folder'], my_config['ana
 # queue building
 redis_conn = Redis()
 q = Queue(connection=redis_conn)
+
+# import
+from project.backend import analysis
+import project.model.model as model
 
 """
 Status
@@ -262,7 +263,5 @@ def notify_analysis():
 
 
 if __name__ == '__main__':
-    if not os.path.exists('../db.sqlite'):
-        db.create_all()
     notify_analysis()
     app.run(debug=False, host='0.0.0.0')
