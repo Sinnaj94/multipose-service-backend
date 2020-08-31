@@ -6,14 +6,13 @@ import jwt
 import time
 import werkzeug
 from flask import jsonify
-from sqlalchemy import ForeignKey, event, desc, asc, or_
+from sqlalchemy import ForeignKey, desc, asc, or_
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import generate_password_hash, check_password_hash
-from marshmallow_enum import EnumField
 
-from app import db, app
+from project.app import db, app
 
 """
 DATABASE MODEL

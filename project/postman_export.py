@@ -1,5 +1,5 @@
 import json
-from app import api
+from project.app import api
 
 urlvars = False  # Build query strings in URLs
 swagger = True  # Export Swagger specifications

@@ -1,11 +1,8 @@
-from flask import jsonify
-
-from backend import analysis_base
 import time
 import json
-from app import app, notify_analysis, db
-from model import model
-from model.model import ResultType, ResultCode
+from project.app import notify_analysis, db
+from project.model import model
+from project.model.model import ResultType, ResultCode
 
 mock_file_3d = "mock_data/ballet.json"
 with open(mock_file_3d, 'r') as file:

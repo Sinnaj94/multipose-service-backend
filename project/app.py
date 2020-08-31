@@ -1,25 +1,17 @@
 #!flask/bin/python
 import os
 
-import time
-from flask import Flask, Blueprint, url_for, g, jsonify
-from flask_restplus import Api, Resource, fields, abort
-import json
-import uuid
-import logging
+from flask import Flask, Blueprint, g, jsonify
+from flask_restplus import Api, Resource, abort
 
-from werkzeug.exceptions import HTTPException
+from project import parsers
 
-import parsers
-
-from sqlite3 import OperationalError
-
-from backend import analysis
+from project.backend import analysis
 
 from rq import Queue
 from redis import Redis
 
-from config import my_config
+from project.config import my_config
 
 # authentication
 from flask_sqlalchemy import SQLAlchemy
@@ -40,7 +32,7 @@ app.config['POSTGRESQL_PASS'] = my_config['postgresql']['password']
 db = SQLAlchemy(app)
 auth = HTTPBasicAuth()
 
-from model import model
+from project.model import model
 
 blueprint = Blueprint('api', __name__)
 api = Api(app=app,
@@ -270,7 +262,7 @@ def notify_analysis():
 
 
 if __name__ == '__main__':
-    if not os.path.exists('db.sqlite'):
+    if not os.path.exists('../db.sqlite'):
         db.create_all()
     notify_analysis()
     app.run(debug=False, host='0.0.0.0')

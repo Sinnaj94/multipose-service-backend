@@ -134,7 +134,7 @@ dmypy.json
 jobs
 out
 gen
-data
+project/data
 *.rdb
 *.db
 
@@ -142,4 +142,4 @@ data
 virtualenvironment
 
 
-postman_export.json
+project/postman_export.json
