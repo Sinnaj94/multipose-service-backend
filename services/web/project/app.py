@@ -1,5 +1,6 @@
 #!flask/bin/python
 import os
+import time
 
 from flask import Flask, Blueprint, g, jsonify
 from flask.cli import FlaskGroup
@@ -10,8 +11,6 @@ from project import parsers
 from rq import Queue
 from redis import Redis
 
-from project.config import my_config
-
 # authentication
 from flask_sqlalchemy import SQLAlchemy
 from flask_httpauth import HTTPBasicAuth
@@ -19,14 +18,7 @@ from flask_httpauth import HTTPBasicAuth
 # initialization
 app = Flask(__name__)
 
-app.config['SECRET_KEY'] = my_config['secret_key']
-app.config['SQLALCHEMY_DATABASE_URI'] = my_config['database_uri']
-app.config['SQLALCHEMY_COMMIT_ON_TEARDOWN'] = True
-
-app.config['POSTGRESQL_USER'] = my_config['postgresql']['username']
-app.config['POSTGRESQL_PASS'] = my_config['postgresql']['password']
-
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config.from_object("project.config.Config")
 
 # extensions
 auth = HTTPBasicAuth()
@@ -39,7 +31,6 @@ api = Api(app=app,
 
 app.register_blueprint(blueprint)
 
-app.config['VIDEO_JOBS'] = os.path.join(my_config['data_folder'], my_config['analysis_2d_jobs_subfolder'])
 
 # queue building
 redis_conn = Redis()
@@ -96,6 +87,13 @@ class GetUser(Resource):
         return model.get_user(id)
 
 
+@user_space.route("/login")
+class Login(Resource):
+    @auth.login_required
+    def get(self):
+        return g.user.serialize()
+
+
 """
 Auth Space
 """
@@ -124,9 +122,12 @@ class GetToken(Resource):
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return token which is valid for 600 seconds')
     def get(self):
-        token = g.user.generate_auth_token(600)
+        # duration in seconds
+        duration = 5184000
+        # todo: make it longer durable mein lieber
+        token = g.user.generate_auth_token(duration)
         print(g.user)
-        return jsonify({'token': token.decode('ascii'), 'duration': 600})
+        return jsonify({'exp': time.time() + duration, 'token': token.decode('ascii'), 'duration': duration, 'user': g.user.serialize()})
 
 
 """
@@ -156,18 +157,20 @@ class Jobs(Resource):
     def post(self):
         id = None
         args = parsers.upload_parser.parse_args()
-        if args['mp4_file'].mimetype == 'video/mp4':
+        if args['video'].mimetype == 'video/mp4':
             # todo: Authentication and stuff.
             id = model.add_job(g.user.id)
-            destination = app.config.get('VIDEO_JOBS')
+            destination = app.config.get('VIDEO_DIR')
             if not os.path.exists(destination):
                 os.makedirs(destination)
-            mp4_file = os.path.join(destination, '%s%s' % (str(id), '.mp4'))
-            args['mp4_file'].save(mp4_file)
+            video = os.path.join(destination, '%s%s' % (str(id), '.mp4'))
+            args['video'].save(video)
         else:
             abort(415)
         if args['autostart'] is True:
-            return start_job(id)
+            args['result_type'] = 0
+            args['person_id'] = None
+            return start_job(id, **args)
         return {'status': 'posted'}
 
 
@@ -188,8 +191,8 @@ class Job(Resource):
 
 
 def start_job(job_id, **kwargs):
-    result = model.start_job(job_id, **kwargs)
-    return result.serialize()
+    status = model.start_job(job_id, **kwargs)
+    return status
 
 
 @jobs_space.route("/start/<uuid:job_id>")
@@ -262,6 +265,5 @@ def notify_analysis():
         print("Waiting queue seems to be empty.")
 
 
-if __name__ == '__main__':
-    notify_analysis()
-    app.run(debug=False, host='0.0.0.0')
+model.db.init_app(app)
+model.db.create_all()

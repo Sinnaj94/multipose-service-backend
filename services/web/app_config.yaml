@@ -7,7 +7,7 @@ secret_key: "KEEP THIS SAVE AND CHANGE IT PLEASE"
 database_uri: 'postgresql:///mocap'
 
 postgresql:
-  database_url: "postgresql:///mocap"
+  database_url: "postgresql://hello_flask:hello_flask@db:5432/mocap"
   username: "user"
   # TODO: CHANGE TO A STRONG PASSWORD. VERY IMPORTANT!
   password: "CHANGETHIS"

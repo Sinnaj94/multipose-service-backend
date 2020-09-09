@@ -17,10 +17,11 @@ from project.app import app
 
 db = SQLAlchemy(app)
 
-
 """
 DATABASE MODEL
 """
+
+
 # source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
 class Users(db.Model):
     __tablename__ = 'users'
@@ -51,6 +52,12 @@ class Users(db.Model):
         print(str(data['id']))
         return Users.query.get(data['id'])
 
+    def serialize(self):
+        return {
+            'username': self.username,
+            'id': str(self.id)
+        }
+
 
 class Posts(db.Model):
     __tablename__ = 'posts'
@@ -78,10 +85,12 @@ class Jobs(db.Model):
     date_updated = db.Column(db.TIMESTAMP, default=datetime.now())
 
     def serialize(self):
+        # TODO: Look for results and serialize them also!
         return {
             "id": str(self.id),
             "user_id": str(self.user_id),
-            "date_updated": str(self.date_updated)
+            "date_updated": str(self.date_updated),
+            "results": [a.serialize() for a in get_results_by_job_id(self.id)]
         }
 
 
@@ -131,8 +140,7 @@ EVENT LISTENERS
 @db.event.listens_for(Results, "after_insert")
 def notify_observers(mapper, connection, target):
     app.logger.debug("New waiting result was inserted. Notifying app.")
-    #notify_analysis()
-
+    # notify_analysis()
 
 
 """methods"""
@@ -253,7 +261,7 @@ def start_job(job_id, **kwargs):
                      )
     db.session.add(result)
     db.session.commit()
-    return result
+    return job.serialize()
 
 
 class UserExists(werkzeug.exceptions.HTTPException):
@@ -275,15 +283,14 @@ def add_user(username, password):
     user.hash_password(password)
     db.session.add(user)
     db.session.commit()
-    return {"username": user.username,
-            "id": str(user.id)}
+    return user.serialize()
 
 
 def get_user(id):
     user = Users.query.get(id)
     if not user:
         raise UserDoesNotExist()
-    return jsonify({'username': user.username})
+    return user.serialize()
 
 
 def get_result_by_id(results_id):

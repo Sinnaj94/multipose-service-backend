@@ -5,11 +5,11 @@ from flask_restplus import reqparse
 import werkzeug
 
 upload_parser = reqparse.RequestParser()
-upload_parser.add_argument('mp4_file',
+upload_parser.add_argument('video',
                            type=werkzeug.datastructures.FileStorage,
                            location='files',
                            required=True,
-                           help='mp4 File'
+                           help='Video File in mp4 format'
                            )
 upload_parser.add_argument('autostart', type=bool, help="Automatically start the job", default=True)
 

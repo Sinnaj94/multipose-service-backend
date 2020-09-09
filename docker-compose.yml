@@ -2,7 +2,8 @@ version: '3.7'
 
 services:
   web:
-    build: ./services/web
+    build:
+      context: ./services/web
     command: python manage.py run -h 0.0.0.0
     volumes:
       - ./services/web/:/usr/src/app/
@@ -10,3 +11,14 @@ services:
       - 5000:5000
     env_file:
       - ./.env.dev
+  db:
+    image: postgres:12-alpine
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=CHANGE_THIS_TO_A_STRONG_PASSWORD
+      - POSTGRES_DB=mocap
+
+volumes:
+  postgres_data:
