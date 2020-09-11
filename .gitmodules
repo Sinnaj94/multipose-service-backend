@@ -1,0 +1,3 @@
+[submodule "services/web/video2bvh"]
+	path = services/web/video2bvh
+	url = https://github.com/KevinLTT/video2bvh
