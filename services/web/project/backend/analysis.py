@@ -1,12 +1,8 @@
 import time
 import json
-import project.app as app
-from project.model import model
-from project.model.model import ResultType, ResultCode
-
-mock_file_3d = "mock_data/ballet.json"
-with open(mock_file_3d, 'r') as file:
-    mock_data_3d = json.load(file)
+#import project.app as app
+#from project.model import model
+#from project.model.model import ResultType, ResultCode
 
 
 def analyse(result_id):
