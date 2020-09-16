@@ -5,12 +5,34 @@ services:
     build:
       context: ./services/web
     command: python manage.py run -h 0.0.0.0
+    environment:
+      - APP_SETTINGS=project.config.Config
     volumes:
       - ./services/web/:/usr/src/app/
     ports:
       - 5000:5000
     env_file:
       - ./.env.dev
+    depends_on:
+      - db
+
+# OPENPOSE AND 3D POSE BASELINE WORKER
+  estimation_worker:
+    env_file:
+      - ./.env.dev
+    build:
+      context: .
+      dockerfile: ./services/estimation_worker/Dockerfile
+    environment:
+      - APP_SETTINGS=project.config.Config
+    depends_on:
+      - redis
+
+# REDIS QUEUE
+  redis:
+    image: "redis:alpine"
+
+
   db:
     image: postgres:12-alpine
     volumes:

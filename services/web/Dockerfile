@@ -1,4 +1,3 @@
-# souurce: https://testdriven.io/blog/dockerizing-flask-with-postgres-gunicorn-and-nginx/
 # pull official base image
 FROM python:3.8.1-slim-buster
 

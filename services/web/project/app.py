@@ -2,13 +2,14 @@
 import os
 import time
 
+import redis
 from flask import Flask, Blueprint, g, jsonify
 from flask.cli import FlaskGroup
 from flask_restplus import Api, Resource, abort
 
 from project import parsers
 
-from rq import Queue
+from rq import Queue, Connection
 from redis import Redis
 
 # authentication
@@ -16,9 +17,12 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_httpauth import HTTPBasicAuth
 
 # initialization
+from tasks import create_task
+
 app = Flask(__name__)
 
-app.config.from_object("project.config.Config")
+app_settings = os.getenv("APP_SETTINGS")
+app.config.from_object(app_settings)
 
 # extensions
 auth = HTTPBasicAuth()
@@ -49,6 +53,11 @@ status_space = api.namespace('status', description='Get the version status of th
 @status_space.route("/")
 class Status(Resource):
     def get(self):
+        # REDIS TEST
+        # TODO: Delete
+        with Connection(redis.from_url(app.config["REDIS_URL"])):
+            q = Queue()
+            task = q.enqueue(create_task)
         return {
             'version': api.version,
             'title': api.title,
