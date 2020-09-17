@@ -132,6 +132,8 @@ def convert(video):
             keypoints_list=points_list,
             method='ignore'
         )
+        if not points_list:
+            return None
         pose2d = np.stack(points_list)[:, :, :2]
         print("Finished to 2d analyse job %s" % job_name)
 
