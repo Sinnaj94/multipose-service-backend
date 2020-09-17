@@ -15,6 +15,7 @@ class Config(object):
     OPENPOSE_MODELS_PATH = "/openpose/models"
     REDIS_URL = "redis://redis:6379/0"
     QUEUES = ["default"]
+    # Configure, if results are stored in files or not
     CACHE_RESULTS = True
     # POSSIBILITIES: CMU / H36M
     EXPORT_FORMAT = "CMU"

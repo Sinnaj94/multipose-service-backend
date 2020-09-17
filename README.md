@@ -1,36 +1,67 @@
 # Motion Capturing API from Single RGB Videos
 This is an API which is using openpose and 3d-pose-baseline to
-calculate dynamic pose data. Input data is an rgb video with a person.
-## Installation
-You have to install some prerequisites before using the application.
-After that you can begin with the installation of the requirements
-### Prerequisites
-You will need [python](https://python.org), [pip](https://pypi.org/project/pip/)
-as well as [redis](https://redis.io/) installed on your machine.
-`python` is the programming language of the API, `pip` is the packet manager
-of python and `redis` is used for storing temporal data.
+calculate dynamic pose data. Input data is a rgb video.
+## Hardware
+You need a graphics card with CUDA-Support for the calculations.
+## Requisites
+This repository has been fully tested on [Ubuntu 20.04](https://releases.ubuntu.com/20.04/).
+It might also work on other Environments, but you may need different installation steps to make it run.
 
-It is recommended to install [docker](https://www.docker.com/) on your machine, as it
-seperates the program in a container and makes it better seperable from
-the system.
+### Installing the NVIDIA driver
+First of all, you should install an NVIDIA driver with support for CUDA >10.0.
+It is recommended to get the newest driver from the [NVIDIA site](https://www.nvidia.de/Download/index.aspx) and install it.
+In Ubuntu, you can install the driver using *Software Update*, but this didn't work for me.
+You don't need to install the CUDA toolkit yet, the Docker Image will take care of that
+([more info on this page](https://github.com/NVIDIA/nvidia-docker)).
+### Installing docker
+This image is heavily relying on the benefits of the software [Docker](https://www.docker.com/).
+You must install it on your local machine. 
+#### docker-compose Extension
+Unfortunately, you have to do an easy manual extension of the *docker-compose*-ecosystem.
+This step is very important, because otherwise, the `docker-compose` commands will not be available for this repository.
 
-### Installation
-First you should create a virtualenvironment for python.
-A virtualenvironment is an encapsulated python environment in which
-you can install your packages. You should install the requirements 
-listed in `requirements.txt` in the virtualenvironment.
-1) Create a virtualenvironment using `virtualenv <name>`
-2) Activate the virtualenvironment using `source <name>/bin/activate`
-3) Install the requirements using `pip install -r requirements.txt`
+It is a [widely known issue](https://github.com/docker/compose/issues/6691), that the NVIDIA toolkit is not integrated into `docker-compose` files yet.
+Follow the steps of *Installation* from the repository https://github.com/NVIDIA/nvidia-container-runtime to make it work.
+### Downloading the 3D models
+The *openpose* images come with docker, so you don't have to take care of that.
+Nonetheless, you have to download the right models for 3d evaluation and put them into the [3d_models](services/web/3d_models) folder.
 
-After that, clone the [openpose](https://github.com/CMU-Perceptual-Computing-Lab/openpose)
-and the [3d-pose-baseline](https://github.com/una-dinosauria/3d-pose-baseline) repositories
-to some place outside of this repository and build them.
+The models are not mine, they are from the following repository: https://github.com/KevinLTT/video2bvh.
+They can be downloaded from [Google Drive](https://drive.google.com/drive/folders/1M2s32xQkrDhDLz-VqzvocMuoaSGR1MfX).
 
-
-### Running the server
-Start the server using
+You only have to download the `openpose_video_pose_243f` folder and extract the files `best_58.58.pth` and `video_pose.yaml`
+directly into the [services/web/3d_models](services/web/3d_models) folder.
+## Configuration
+### Security
+:warning: If you are planning on running this app on production, it is important to change the keys
+to *secure strings*.
+#### PostgreSQL
+From [docker-compose.yml](docker-compose.yml):
 ```
-FLASK_APP=app.py flask run 
+environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=CHANGE_THIS_TO_A_STRONG_PASSWORD
+      - POSTGRES_DB=mocap
 ```
-## Guidelines
+From [.env.dev](.env.dev):
+```
+DATABASE_URL=postgresql://user:CHANGE_THIS_TO_A_STRONG_PASSWORD@db:5432/mocap
+```
+#### Flask
+From [.env.dev](.env.dev): 
+```
+SECRET_KEY=CHANGE_THIS_KEY
+```
+
+### App Settings
+The Server Settings can be accessed in file [config.py](services/web/project/config.py).
+
+## Running
+Running this repository is fairly easy. You just have to type `docker-compose build` to build the image and `docker-compose up`
+to run the application. Docker will take care of creating and managing the containers and installing all the requirements.
+
+## References
+- [video2bvh](https://github.com/KevinLTT/video2bvh) by KevinLTT
+- [openpose](https://github.com/CMU-Perceptual-Computing-Lab/openpose) by CMU-Perceptual-Computing-Lab
+- [openpose Docker image](https://hub.docker.com/r/cwaffles/openpose) by cwaffles
+
