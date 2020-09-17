@@ -140,7 +140,6 @@ services/web/project/data
 
 *.sqlite
 virtualenvironment
-
-services/output
-services/input
-services/web/project/postman_export.json
+services/web/3d_models/best_58.58.pth
+services/web/3d_models/video_pose.yaml
+cache

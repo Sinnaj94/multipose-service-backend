@@ -1,0 +1,2 @@
+1: Download openpose_video_pose_243f from https://drive.google.com/drive/folders/1M2s32xQkrDhDLz-VqzvocMuoaSGR1MfX .
+2: Place files "best_58.58.pth" and "video_pose.yaml" into this directory

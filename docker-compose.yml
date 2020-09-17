@@ -1,10 +1,13 @@
-version: '3.7'
-
+version: '3.8'
+# ISSUES: https://github.com/docker/compose/issues/6691
+# Answer from "uderik"
 services:
   web:
+    container_name: web
+    image: web
     build:
       context: ./services/web
-    command: python manage.py run -h 0.0.0.0
+    command: python3 manage.py run -h 0.0.0.0
     environment:
       - APP_SETTINGS=project.config.Config
     volumes:
@@ -18,13 +21,17 @@ services:
 
 # OPENPOSE AND 3D POSE BASELINE WORKER
   estimation_worker:
+    image: web
+    container_name: estimation
     env_file:
       - ./.env.dev
-    build:
-      context: .
-      dockerfile: ./services/estimation_worker/Dockerfile
+    volumes:
+      - ./services/web/cache/:/usr/src/app/cache/
     environment:
       - APP_SETTINGS=project.config.Config
+      - NVIDIA_VISIBLE_DEVICES=all
+    runtime: nvidia
+    command: python3 manage.py run_worker
     depends_on:
       - redis
 

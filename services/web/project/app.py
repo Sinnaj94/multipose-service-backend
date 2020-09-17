@@ -17,7 +17,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_httpauth import HTTPBasicAuth
 
 # initialization
-from tasks import create_task
+from project.conversion_task import convert
 
 app = Flask(__name__)
 
@@ -54,10 +54,6 @@ status_space = api.namespace('status', description='Get the version status of th
 class Status(Resource):
     def get(self):
         # REDIS TEST
-        # TODO: Delete
-        with Connection(redis.from_url(app.config["REDIS_URL"])):
-            q = Queue()
-            task = q.enqueue(create_task)
         return {
             'version': api.version,
             'title': api.title,
@@ -164,22 +160,20 @@ class Jobs(Resource):
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return the new job')
     def post(self):
-        id = None
+        job_id = None
         args = parsers.upload_parser.parse_args()
         if args['video'].mimetype == 'video/mp4':
             # todo: Authentication and stuff.
-            id = model.add_job(g.user.id)
-            destination = app.config.get('VIDEO_DIR')
-            if not os.path.exists(destination):
-                os.makedirs(destination)
-            video = os.path.join(destination, '%s%s' % (str(id), '.mp4'))
-            args['video'].save(video)
+            job_id = model.add_job(g.user.id)
         else:
             abort(415)
         if args['autostart'] is True:
             args['result_type'] = 0
             args['person_id'] = None
-            return start_job(id, **args)
+            with Connection(redis.from_url(app.config["REDIS_URL"])):
+                q = Queue()
+                task = q.enqueue(convert, args['video'].read(), job_id=str(job_id))
+            return start_job(job_id, **args)
         return {'status': 'posted'}
 
 

@@ -28,3 +28,7 @@ opencv-python
 torch
 torchvision
 easydict
+progressbar
+h5py
+matplotlib
+git+git://github.com/Sinnaj94/video2bvh.git
