@@ -3,9 +3,13 @@ import os
 import time
 
 import redis
-from flask import Flask, Blueprint, g, jsonify
+import rq
+from rq.job import Job as RedisJob
+from rq.exceptions import NoSuchJobError
+from flask import Flask, Blueprint, g, jsonify, send_from_directory
 from flask.cli import FlaskGroup
 from flask_restplus import Api, Resource, abort
+from werkzeug.exceptions import HTTPException
 
 from project import parsers
 
@@ -17,6 +21,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_httpauth import HTTPBasicAuth
 
 # initialization
+from project.config import Config
 from project.conversion_task import convert
 
 app = Flask(__name__)
@@ -37,11 +42,9 @@ app.register_blueprint(blueprint)
 
 
 # queue building
-redis_conn = Redis()
-q = Queue(connection=redis_conn)
+conn = redis.from_url(app.config["REDIS_URL"])
 
 # import
-from project.backend import analysis
 import project.model.model as model
 
 """
@@ -141,13 +144,29 @@ Jobs Space
 jobs_space = api.namespace('jobs', description='Jobs')
 
 
+class JobRunning(HTTPException):
+    code = 202
+    description = "Job is pending"
+
+
+def get_job(id):
+    try:
+        job = RedisJob.fetch(str(id), connection=conn)
+    # if the server was restarted or job not found, it might still be in database
+    except NoSuchJobError as e:
+        return model.get_job(id)
+    if job.is_finished:
+        return model.get_job(id)
+    else:
+        raise JobRunning
+
+
+
 @jobs_space.route("/")
 class Jobs(Resource):
     """
     Job status
     """
-
-    # get via id
     @auth.login_required
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return all jobs belonging to the authorized user')
@@ -160,21 +179,14 @@ class Jobs(Resource):
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return the new job')
     def post(self):
-        job_id = None
-        args = parsers.upload_parser.parse_args()
-        if args['video'].mimetype == 'video/mp4':
-            # todo: Authentication and stuff.
-            job_id = model.add_job(g.user.id)
-        else:
+        args = parsers.upload_parser.parse_args()#
+        # check if the sent file is actually a video.
+        if not args['video'].mimetype == 'video/mp4':
             abort(415)
-        if args['autostart'] is True:
-            args['result_type'] = 0
-            args['person_id'] = None
-            with Connection(redis.from_url(app.config["REDIS_URL"])):
-                q = Queue()
-                task = q.enqueue(convert, args['video'].read(), job_id=str(job_id))
-            return start_job(job_id, **args)
-        return {'status': 'posted'}
+        with Connection(conn):
+            q = Queue()
+            task = q.enqueue(convert, video=args['video'].read(), user_id=str(g.user.id))
+            return {"job_id" : task.get_id()}
 
 
 @jobs_space.route("/<uuid:job_id>")
@@ -190,29 +202,47 @@ class Job(Resource):
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return the new job')
     def get(self, job_id):
-        return model.get_job(job_id).serialize()
+        return get_job(job_id).serialize()
+
+
+class ResultFailedException(HTTPException):
+    code = 404
+    description = "Result has failed, hence there is no video"
+
+
+@jobs_space.route("/<uuid:job_id>/source_video")
+class JobSourceVideo(Resource):
+    @auth.login_required
+    @api.produces(["video/mp4"])
+    @api.response(200, 'Return video file')
+    def get(self, job_id):
+        # check if job exists
+        job = get_job(job_id)
+        # get the result
+        res = model.get_result_by_job_id(job.id)
+        # check if result is succesful
+        return send_from_directory(res.file_directory, Config.SOURCE_VIDEO_FILE, as_attachment=True,
+                                   mimetype="video/mp4")
+
+
+@jobs_space.route("/<uuid:job_id>/output_video")
+class JobOutputVideo(Resource):
+    @auth.login_required
+    @api.produces(["video/mp4"])
+    @api.response(200, 'Return video file')
+    def get(self, job_id):
+        # check if job exists
+        job = get_job(job_id)
+        # get the result
+        res = model.get_result_by_job_id(job.id)
+        # check if result is succesful
+        return send_from_directory(res.file_directory, Config.OUTPUT_VIDEO_FILE, as_attachment=True,
+                                   mimetype="video/mp4")
 
 
 def start_job(job_id, **kwargs):
     status = model.start_job(job_id, **kwargs)
     return status
-
-
-@jobs_space.route("/start/<uuid:job_id>")
-class StartJob(Resource):
-    @auth.login_required
-    @api.response(400, 'Bad request')
-    @api.response(404, 'A job with the given id was not found')
-    @api.response(401, 'The user is not permitted to do this action')
-    @api.response(200, 'Return the new result object')
-    @api.response(409, 'The result already exists / is pending for the given id')
-    @api.response(503, '2D Result does not exist, so 3d analysis can not be started yet')
-    @api.expect(parsers.job_start_parser)
-    def post(self, job_id):
-        args = parsers.job_start_parser.parse_args()
-        if args['result_type'] == 0 and args['person_id'] is not None:
-            abort(400, "Person id must be null when result_type is set to 0")
-        return start_job(job_id, **args)
 
 
 """
@@ -257,16 +287,6 @@ class Posts(Resource):
     def get(self):
         return model.serialize_array(model.get_all_public_posts())
 
-
-def notify_analysis():
-    mdl = model.get_pending_results().first()
-    # send to analysis class as json
-    if mdl is not None:
-        print("yeah")
-        test = q.enqueue(analysis.analyse, mdl.id)
-    else:
-        print("Waiting queue seems to be empty.")
-
-
+# TODO: Put this into "manager"
 model.db.init_app(app)
 model.db.create_all()

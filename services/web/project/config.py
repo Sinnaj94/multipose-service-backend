@@ -19,3 +19,10 @@ class Config(object):
     CACHE_RESULTS = True
     # POSSIBILITIES: CMU / H36M
     EXPORT_FORMAT = "CMU"
+    SOURCE_VIDEO_FILE = "source_video.mp4"
+    OUTPUT_VIDEO_FILE = "output_video.mp4"
+    DATA_2D_FILE = "data_2d.npy"
+    CONFIG_2D_FILE = "config_2d.npy"
+    DATA_3D_FILE = "data_3d.npy"
+
+

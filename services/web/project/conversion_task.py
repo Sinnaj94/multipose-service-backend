@@ -1,39 +1,28 @@
-import argparse
+from rq.job import get_current_job
 
-from rq.job import get_current_job, Job
-
-from project.backend import analysis
-from os import path
-import sys
 import progressbar
-import time
 import cv2
-import importlib
 import numpy as np
 import os
 from pathlib import Path
 # from IPython.display import HTML
-
+from matplotlib.animation import FuncAnimation
 
 from video2bvh.pose_estimator_2d import openpose_estimator
 from video2bvh.pose_estimator_3d import estimator_3d
 from video2bvh.utils import smooth, vis, camera
-from video2bvh.bvh_skeleton import openpose_skeleton, h36m_skeleton, cmu_skeleton
+from video2bvh.bvh_skeleton import h36m_skeleton, cmu_skeleton
 
 from project.config import Config
-
-SOURCE_VIDEO_FILE = "source_video.mp4"
-DATA_2D_FILE = "data_2d.npy"
-CONFIG_2D_FILE = "config_2d.npy"
-DATA_3D_FILE = "data_3d.npy"
 
 
 def analyse_2d(cache_dir, persist=True):
     # get model
     e2d = openpose_estimator.OpenPoseEstimator(model_folder=Config.OPENPOSE_MODELS_PATH)
 
-    cap = cv2.VideoCapture(str(cache_dir / SOURCE_VIDEO_FILE))
+    cap = cv2.VideoCapture(str(cache_dir / Config.SOURCE_VIDEO_FILE))
     video_length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS)
     keypoints_list = []
     img_width, img_height = None, None
     # progess bar visualizes
@@ -60,7 +49,7 @@ def analyse_2d(cache_dir, persist=True):
         i += 1
         bar.update(i)
     cap.release()
-    config = {'img_width': img_width, 'img_height': img_height, 'frames': video_length}
+    config = {'img_width': img_width, 'img_height': img_height, 'frames': video_length, 'fps': fps}
 
     return keypoints_list, config
 
@@ -91,21 +80,25 @@ def analyse_3d(pose2d, conf, cache_dir):
     return pose3d_world, conf
 
 
-def export_gif(pose3d_world, video_file, config, fps=60):
+def export_video(pose3d_world, video_file, config, fps=60):
     # TODO: Machen
     h36m_skel = h36m_skeleton.H36mSkeleton()
     ani = vis.vis_3d_keypoints_sequence(
-        keypoints_sequence=pose3d_world[0:300],
+        keypoints_sequence=pose3d_world,
         skeleton=h36m_skel,
-        azimuth=config['azimuth'],
+        azimuth=np.array(config['azimuth']),
         fps=fps,
-        # output_file=output_dir / 'test.mp4'
+        output_file=video_file
     )
-    # output_file=gif_file
 
 
-def convert(video):
+
+def convert(video, user_id):
+    from project.model import model
     job_name = str(get_current_job().get_id())
+    # add to database
+    model.add_job(**{"job_id": job_name,
+                     "user_id": user_id})
     # The cache dir will look like that : cache/aabb-ccc-dddd-fff-ggg/ (UUID)
     cache_dir = Path(os.path.join(Config.CACHE_DIR, job_name))
 
@@ -114,13 +107,13 @@ def convert(video):
         os.makedirs(cache_dir)
 
     # save the video in the cache folder
-    filename = os.path.join(cache_dir, SOURCE_VIDEO_FILE)
+    filename = os.path.join(cache_dir, Config.SOURCE_VIDEO_FILE)
     with(open(filename, 'wb')) as file:
         file.write(video)
     file.close()
 
-    pose2d_file = cache_dir / DATA_2D_FILE
-    pose3d_file = cache_dir / DATA_3D_FILE
+    pose2d_file = cache_dir / Config.DATA_2D_FILE
+    pose3d_file = cache_dir / Config.DATA_3D_FILE
     pose3d_world = None
     points_list = None
     if not pose2d_file.exists() or not Config.CACHE_RESULTS:
@@ -133,6 +126,12 @@ def convert(video):
             method='ignore'
         )
         if not points_list:
+            kwargs = {"job_id": job_name,
+                      "user_id": user_id,
+                      "result_code": model.ResultCode.failure,
+                      "file_directory": str(cache_dir.absolute())}
+
+            model.save_result(**kwargs)
             return None
         pose2d = np.stack(points_list)[:, :, :2]
         print("Finished to 2d analyse job %s" % job_name)
@@ -160,8 +159,8 @@ def convert(video):
         conf_3d = np.load(cache_dir / '3d_conf.npy').values()
 
     # GIF
-    print("Generating a GIF for %s" % job_name)
-    export_gif(pose3d_world, cache_dir / 'video.mp4', conf_3d)
+    print("Generating a preview Video for %s" % job_name)
+    export_video(pose3d_world, cache_dir / Config.OUTPUT_VIDEO_FILE, conf_3d, fps=config_2d['fps'])
 
     print("Generating a BVH file for %s" % job_name)
     bvh_file = cache_dir / f'{job_name}.bvh'
@@ -173,3 +172,11 @@ def convert(video):
         _ = h36m_skel.poses2bvh(pose3d_world, output_file=bvh_file)
     else:
         raise ValueError("Unrecognized Panoptic style %s. You must decide between CMU and H36M.", Config.EXPORT_FORMAT)
+
+    kwargs = {"job_id": job_name,
+              "user_id": user_id,
+              "result_code": model.ResultCode.success,
+              "file_directory": str(cache_dir.absolute())}
+
+    model.save_result(**kwargs)
+    return True

@@ -8,8 +8,9 @@ WORKDIR /usr/local/lib/python3.6/dist-packages/openpose
 RUN ln -s pyopenpose.cpython-36m-x86_64-linux-gnu.so pyopenpose
 ENV LD_LIBRARY_PATH=/openpose/build/python/openpose
 # python setuptools
+RUN apt-get update
 RUN apt-get install python3-setuptools -y
-
+RUN apt-get install ffmpeg -y
 # set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1

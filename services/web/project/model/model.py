@@ -80,29 +80,27 @@ class Posts(db.Model):
 class Jobs(db.Model):
     __tablename_ = 'jobs'
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
-    result_children = relationship("Results", backref="jobs", lazy='dynamic', cascade="all, delete-orphan")
+    result_children = relationship("Results", backref="jobs")
     user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    # Date updated
     date_updated = db.Column(db.TIMESTAMP, default=datetime.now())
 
     def serialize(self):
         # TODO: Look for results and serialize them also!
+        result = get_result_by_job_id(self.id)
+        if result is not None:
+            result = result.serialize()
         return {
             "id": str(self.id),
             "user_id": str(self.user_id),
             "date_updated": str(self.date_updated),
-            "results": [a.serialize() for a in get_results_by_job_id(self.id)]
+            "result": result
         }
 
 
 class ResultCode(enum.Enum):
     success = 1
-    waiting = 0
-    failure = -1
-
-
-class ResultType(enum.Enum):
-    dimension_2d = 0
-    dimension_3d = 1
+    failure = 0
 
 
 class Results(db.Model):
@@ -110,12 +108,9 @@ class Results(db.Model):
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
     job_id = db.Column(UUID(as_uuid=True), ForeignKey('jobs.id'))
     user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
-    result_code = db.Column(db.Enum(ResultCode), nullable=False, default=ResultCode.waiting)
-    data = db.Column(db.String)
-    date_updated = db.Column(db.TIMESTAMP, default=datetime.now(), nullable=False)
-    num_people = db.Column(db.Integer)
-    person_index = db.Column(db.Integer)
-    result_type = db.Column(db.Enum(ResultType), nullable=False)
+    result_code = db.Column(db.Enum(ResultCode), nullable=False)
+    file_directory = db.Column(db.String, nullable=True)
+    date = db.Column(db.TIMESTAMP, default=datetime.now(), nullable=False)
 
     def serialize(self):
         var = {
@@ -123,9 +118,7 @@ class Results(db.Model):
             "job_id": str(self.job_id),
             "user_id": str(self.user_id),
             "result_code": str(self.result_code),
-            "result_type": str(self.result_type),
-            "person_id": self.person_index,
-            "data": self.data
+            "file_directory": str(self.file_directory)
         }
         return var
 
@@ -173,9 +166,9 @@ def get_job(job_id):
     return job
 
 
-def add_job(user_id):
+def add_job(**kwargs):
     # todo: authentication
-    job = Jobs(user_id=user_id)
+    job = Jobs(id=kwargs['job_id'],user_id=kwargs['user_id'])
     db.session.add(job)
     db.session.commit()
     return job.id
@@ -192,9 +185,8 @@ def get_results_by_user_id(user_id):
     return jobs
 
 
-def get_results_by_job_id(job_id):
-    results = db.session.query(Results).filter_by(job_id=job_id)
-    return results
+def get_result_by_job_id(job_id):
+    return db.session.query(Results).filter_by(job_id=job_id).first()
 
 
 def get_jobs_by_user_id(user_id):
@@ -210,58 +202,12 @@ def result_exists_for_job_id(job_id, result_type, person_id=None):
     return db.session.query(Results).filter_by(job_id=job_id, result_type=result_type, person_index=person_id)
 
 
-class ResultDoesNotExistYet(HTTPException):
-    code = 503
-    description = "2D Result does not exist, so 3d analysis can not be started yet"
-
-
-class Result2DFailed(HTTPException):
-    code = 400
-    description = "2D result pending or failed."
-
-
-class ResultExists(HTTPException):
-    code = 409
-    description = "A result for the given job already exists or has been queued."
-
-
-def start_job(job_id, **kwargs):
-    job = retrieve_job(job_id)
-    result_type = ResultType.dimension_2d
-    if kwargs['result_type']:
-        result_type = ResultType(kwargs['result_type'])
-    person_id = kwargs['person_id']
-    # person id can be ignored.
-    if result_type == ResultType.dimension_2d:
-        person_id = None
-
-    # a result should never exist twice!
-    results = result_exists_for_job_id(job_id, result_type, person_id)
-    if results.count() > 0:
-        raise ResultExists()
-    # if 3d result is requested
-    if result_type is ResultType.dimension_3d:
-        # 2d result has to exist!
-        results_2d = result_exists_for_job_id(job_id, result_type)
-        if results_2d.count() == 0:
-            raise ResultDoesNotExistYet()
-        results_2d_waiting_or_failed = results_2d.filter(or_(Results.result_code == ResultCode.failure,
-                                                             Results.result_code == ResultCode.waiting)).first()
-        if results_2d_waiting_or_failed:
-            if results_2d_waiting_or_failed.result_code == ResultCode.failure:
-                raise Result2DFailed()
-            else:
-                raise Result2DFailed("2d result is pending")
-
-    result = Results(job_id=job_id,
-                     user_id=job.user_id,
-                     result_type=result_type,
-                     person_index=person_id,
-                     result_code=ResultCode.waiting
-                     )
+def save_result(**kwargs):
+    result = Results(job_id=kwargs['job_id'], user_id=kwargs['user_id'], result_code=kwargs['result_code'],
+                     file_directory=kwargs['file_directory'])
     db.session.add(result)
     db.session.commit()
-    return job.serialize()
+    return result.id
 
 
 class UserExists(werkzeug.exceptions.HTTPException):
@@ -294,10 +240,7 @@ def get_user(id):
 
 
 def get_result_by_id(results_id):
-    result = Results.query.get(results_id)
-    if result is None:
-        raise ResultDoesNotExistYet()
-    return result
+    return Results.query.get(results_id)
 
 
 def filter_results(user_id, args):

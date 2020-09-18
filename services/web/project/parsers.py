@@ -11,7 +11,6 @@ upload_parser.add_argument('video',
                            required=True,
                            help='Video File in mp4 format'
                            )
-upload_parser.add_argument('autostart', type=bool, help="Automatically start the job", default=True)
 
 results_parser = reqparse.RequestParser()
 results_parser.add_argument('result_code', type=int, help='Result Code: -1 = failed, 0 = pending, 1 = success')
