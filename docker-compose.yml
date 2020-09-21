@@ -12,6 +12,7 @@ services:
       - APP_SETTINGS=project.config.Config
     volumes:
       - ./services/web/:/usr/src/app/
+      - file-cache:/usr/data/
     ports:
       - 5000:5000
     env_file:
@@ -26,7 +27,7 @@ services:
     env_file:
       - ./.env.dev
     volumes:
-      - ./services/web/:/usr/src/app/
+      - file-cache:/usr/data/
     environment:
       - APP_SETTINGS=project.config.Config
       - NVIDIA_VISIBLE_DEVICES=all
@@ -51,3 +52,4 @@ services:
 
 volumes:
   postgres_data:
+  file-cache:

@@ -5,6 +5,7 @@ from flask_restplus import reqparse
 import werkzeug
 
 upload_parser = reqparse.RequestParser()
+upload_parser.add_argument('name', default="My Job", type=str)
 upload_parser.add_argument('video',
                            type=werkzeug.datastructures.FileStorage,
                            location='files',
@@ -21,3 +22,10 @@ results_parser.add_argument('person_id', type=int, help='Result with person inde
 job_start_parser = reqparse.RequestParser()
 job_start_parser.add_argument('result_type', type=int, help='Result Type: 0 = 2d, 1 = 3d')
 job_start_parser.add_argument('person_id', type=int, help='Result with person index')
+
+
+user_metadata_parser = reqparse.RequestParser()
+user_metadata_parser.add_argument('prename', type=str, required=False)
+user_metadata_parser.add_argument('surname', type=str, required=False)
+user_metadata_parser.add_argument('email', type=str, required=False)
+user_metadata_parser.add_argument('website', type=str, required=False)

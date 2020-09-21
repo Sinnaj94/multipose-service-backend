@@ -28,8 +28,10 @@ class Users(db.Model):
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
     username = db.Column(db.String(32), index=True)
     password_hash = db.Column(db.String(128))
-    posts = relationship("Posts", backref="user", lazy='dynamic', cascade="all, delete-orphan")
-    result_children = relationship("Results", backref="users", lazy='dynamic', cascade="all, delete-orphan")
+    registration_date = db.Column(db.TIMESTAMP, nullable=False, default=datetime.now())
+    user_metadata = relationship("UserMetadata", backref="users")
+    posts = relationship("Posts", backref="users", lazy='dynamic', cascade="all, delete-orphan")
+    result = relationship("Results", backref="users", lazy='dynamic', cascade="all, delete-orphan")
 
     def hash_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -59,68 +61,49 @@ class Users(db.Model):
         }
 
 
+class UserMetadata(db.Model):
+    __tablename__ = 'user_metadata'
+    user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'), primary_key=True)
+    prename = db.Column(db.String, nullable=True)
+    surname = db.Column(db.String, nullable=True)
+    website = db.Column(db.String, nullable=True)
+    email = db.Column(db.String, nullable=True)
+
+
 class Posts(db.Model):
     __tablename__ = 'posts'
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
     user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    result_id = db.Column(UUID(as_uuid=True), ForeignKey('results.id'))
     public = db.Column(db.BOOLEAN, default=True)
-    data = db.Column(db.String, nullable=False)
     date = db.Column(db.TIMESTAMP, nullable=False, default=datetime.now())
     title = db.Column(db.String(64), nullable=False)
-
-    def serialize(self):
-        return {
-            "title": self.title,
-            "date": str(self.date),
-            "username": get_user(self.user_id).username
-        }
 
 
 # parent
 class Jobs(db.Model):
     __tablename_ = 'jobs'
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
-    result_children = relationship("Results", backref="jobs")
+    result = relationship("Results", backref="jobs")
+    name = db.Column(db.String, nullable=False)
+    file_directory = db.Column(db.String)
     user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
     # Date updated
     date_updated = db.Column(db.TIMESTAMP, default=datetime.now())
-
-    def serialize(self):
-        # TODO: Look for results and serialize them also!
-        result = get_result_by_job_id(self.id)
-        if result is not None:
-            result = result.serialize()
-        return {
-            "id": str(self.id),
-            "user_id": str(self.user_id),
-            "date_updated": str(self.date_updated),
-            "result": result
-        }
 
 
 class ResultCode(enum.Enum):
     success = 1
     failure = 0
+    pending = -1
 
 
 class Results(db.Model):
     __tablename_ = 'results'
-    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
-    job_id = db.Column(UUID(as_uuid=True), ForeignKey('jobs.id'))
+    id = db.Column(UUID(as_uuid=True), ForeignKey('jobs.id'), primary_key=True)
     user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
-    result_code = db.Column(db.Enum(ResultCode), nullable=False)
-    file_directory = db.Column(db.String, nullable=True)
+    result_code = db.Column(db.Enum(ResultCode), nullable=False, default=ResultCode.pending)
     date = db.Column(db.TIMESTAMP, default=datetime.now(), nullable=False)
-
-    def serialize(self):
-        var = {
-            "id": str(self.id),
-            "job_id": str(self.job_id),
-            "user_id": str(self.user_id),
-            "result_code": str(self.result_code),
-            "file_directory": str(self.file_directory)
-        }
-        return var
 
 
 db.create_all()
@@ -161,14 +144,10 @@ def retrieve_job(job_id):
     return job
 
 
-def get_job(job_id):
-    job = retrieve_job(job_id)
-    return job
-
-
 def add_job(**kwargs):
     # todo: authentication
-    job = Jobs(id=kwargs['job_id'],user_id=kwargs['user_id'])
+    job = Jobs(id=kwargs['job_id'],user_id=kwargs['user_id'], name=kwargs['name'],
+               file_directory=kwargs['file_directory'])
     db.session.add(job)
     db.session.commit()
     return job.id
@@ -190,8 +169,7 @@ def get_result_by_job_id(job_id):
 
 
 def get_jobs_by_user_id(user_id):
-    jobs = db.session.query(Jobs).filter_by(user_id=user_id)
-    return jobs
+    return db.session.query(Jobs).filter_by(user_id=user_id).all()
 
 
 def serialize_array(ar):
@@ -202,12 +180,11 @@ def result_exists_for_job_id(job_id, result_type, person_id=None):
     return db.session.query(Results).filter_by(job_id=job_id, result_type=result_type, person_index=person_id)
 
 
-def save_result(**kwargs):
-    result = Results(job_id=kwargs['job_id'], user_id=kwargs['user_id'], result_code=kwargs['result_code'],
-                     file_directory=kwargs['file_directory'])
+def add_result(**kwargs):
+    result = Results(id=kwargs['id'], user_id=kwargs['user_id'])
     db.session.add(result)
     db.session.commit()
-    return result.id
+    return result
 
 
 class UserExists(werkzeug.exceptions.HTTPException):
@@ -229,30 +206,22 @@ def add_user(username, password):
     user.hash_password(password)
     db.session.add(user)
     db.session.commit()
-    return user.serialize()
+    return user
 
 
 def get_user(id):
     user = Users.query.get(id)
     if not user:
         raise UserDoesNotExist()
-    return user.serialize()
+    return user
 
 
 def get_result_by_id(results_id):
     return Results.query.get(results_id)
 
 
-def filter_results(user_id, args):
-    results = db.session.query(Results).filter_by(user_id=user_id)
-    if args['job_id']:
-        results = results.filter_by(job_id=args['job_id'])
-    if args['result_code']:
-        results = results.filter_by(result_code=ResultCode(args['result_code']))
-    if args['result_type']:
-        results = results.filter_by(result_code=ResultType(args['result_type']))
-    if args['person_id']:
-        results = results.filter_by(person_index=args['person_id'])
+def filter_results(user_id):
+    results = db.session.query(Results).filter_by(user_id=user_id).all()
     return results
 
 
@@ -262,3 +231,35 @@ def get_all_public_posts():
 
 def get_pending_results():
     return db.session.query(Results).filter_by(result_code=ResultCode.waiting).order_by(asc(Results.date_updated))
+
+
+def get_users():
+    return Users.query.all()
+
+
+def update_metadata(**kwargs):
+    # check if metadata already exists.
+    meta = UserMetadata.query.get(kwargs['user_id'])
+    if meta is None:
+        print("Creating User Metadata")
+        meta = UserMetadata(user_id=kwargs['user_id'])
+        db.session.add(meta)
+    if kwargs['prename'] is not None:
+        meta.prename = kwargs['prename']
+    if kwargs['surname'] is not None:
+        meta.surname = kwargs['surname']
+    if kwargs['website'] is not None:
+        meta.website = kwargs['website']
+    if kwargs['email'] is not None:
+        meta.email = kwargs['email']
+
+    db.session.commit()
+    return meta
+
+
+def get_job_by_id(id):
+    return Jobs.query.get(id)
+
+
+def get_job_by_result_id(id):
+    return db.session.query(Jobs).join(Results, Jobs.result).filter(Results.id == id).first()

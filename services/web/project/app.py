@@ -3,26 +3,23 @@ import os
 import time
 
 import redis
-import rq
 from rq.job import Job as RedisJob
 from rq.exceptions import NoSuchJobError
 from flask import Flask, Blueprint, g, jsonify, send_from_directory
-from flask.cli import FlaskGroup
-from flask_restplus import Api, Resource, abort
+from flask_restplus import Api, Resource, abort, fields
 from werkzeug.exceptions import HTTPException
 
 from project import parsers
 
 from rq import Queue, Connection
-from redis import Redis
 
 # authentication
-from flask_sqlalchemy import SQLAlchemy
 from flask_httpauth import HTTPBasicAuth
 
 # initialization
 from project.config import Config
 from project.conversion_task import convert
+from project.parsers import user_metadata_parser
 
 app = Flask(__name__)
 
@@ -38,8 +35,38 @@ api = Api(app=app,
           title="Motion Capturing API",
           description="Motion Capturing Library from single RGB Videos")
 
-app.register_blueprint(blueprint)
+# import marshallers
+results_marshal = api.model('Result', {
+    'id': fields.String,
+    'result_code': fields.String,
+    'date': fields.DateTime(dt_format='rfc822'),
+    'output_video_url': fields.Url('results_result_output_video'),
+    'output_bvh': fields.Url('results_result_bvh_file')
 
+})
+jobs_marshal = api.model('Job', {
+    # TODO: Show user name
+    'id': fields.String,
+    'name': fields.String,
+    'date_updated': fields.DateTime(dt_format='rfc822'),
+    'input_video_url': fields.Url('jobs_job_source_video'),
+    'result': fields.Nested(results_marshal),
+})
+user_metadata_marshal = api.model('UserMetadata', {
+    'prename': fields.String,
+    'surname': fields.String,
+    'website': fields.String,
+    'email': fields.String
+})
+user_marshal = api.model('User', {
+    'id' : fields.String,
+    'username' : fields.String,
+    'registration_date' : fields.DateTime(dt_format='rfc822'),
+    'user_metadata': fields.Nested(user_metadata_marshal)
+})
+
+
+app.register_blueprint(blueprint)
 
 # queue building
 conn = redis.from_url(app.config["REDIS_URL"])
@@ -53,6 +80,7 @@ Status
 
 status_space = api.namespace('status', description='Get the version status of the api')
 
+
 @status_space.route("/")
 class Status(Resource):
     def get(self):
@@ -63,6 +91,7 @@ class Status(Resource):
             'description': api.description,
             'id': 'motion_capturing_api'
         }
+
 
 """
 USER MANAGEMENT
@@ -77,22 +106,40 @@ user_parser.add_argument('password', type=str, required=True, location='form')
 
 # source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
 @user_space.route("/", endpoint='with-parser')
-class CreateUser(Resource):
+class Users(Resource):
     @api.expect(user_parser)
     @api.response(409, 'A user with given username already exists')
     @api.response(200, 'User successfully created')
+    @user_space.marshal_with(user_marshal)
     def post(self):
         args = user_parser.parse_args(strict=True)
         return model.add_user(args['username'], args['password'])
 
+    @user_space.marshal_list_with(user_marshal)
+    @api.response(200, 'Return users')
+    def get(self):
+        return model.get_users()
+
 
 # source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
 @user_space.route("/<uuid:id>")
-class GetUser(Resource):
+class User(Resource):
     @api.response(404, 'The user with given id does not exist')
     @api.response(200, 'Return user with given id')
+    @user_space.marshal_with(user_marshal)
     def get(self, id):
         return model.get_user(id)
+
+
+@user_space.route("/<uuid:id>/metadata")
+class UserMetadata(Resource):
+    @api.expect(user_metadata_parser)
+    @user_space.marshal_with(user_metadata_marshal)
+    @auth.login_required
+    def put(self, id):
+        kwargs = user_metadata_parser.parse_args(strict=True)
+        kwargs['user_id'] = g.user.id
+        return model.update_metadata(**kwargs)
 
 
 @user_space.route("/login")
@@ -135,7 +182,8 @@ class GetToken(Resource):
         # todo: make it longer durable mein lieber
         token = g.user.generate_auth_token(duration)
         print(g.user)
-        return jsonify({'exp': time.time() + duration, 'token': token.decode('ascii'), 'duration': duration, 'user': g.user.serialize()})
+        return jsonify({'exp': time.time() + duration, 'token': token.decode('ascii'), 'duration': duration,
+                        'user': g.user.serialize()})
 
 
 """
@@ -154,12 +202,13 @@ def get_job(id):
         job = RedisJob.fetch(str(id), connection=conn)
     # if the server was restarted or job not found, it might still be in database
     except NoSuchJobError as e:
-        return model.get_job(id)
+        return model.retrieve_job(id)
     if job.is_finished:
-        return model.get_job(id)
+        return model.retrieve_job(id)
     else:
-        raise JobRunning
-
+        e = JobRunning
+        e.data = {"stage" : job.meta['stage']}
+        raise e
 
 
 @jobs_space.route("/")
@@ -168,10 +217,11 @@ class Jobs(Resource):
     Job status
     """
     @auth.login_required
+    @jobs_space.marshal_list_with(jobs_marshal, envelope="jobs")
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return all jobs belonging to the authorized user')
     def get(self):
-        return model.serialize_array(model.get_jobs_by_user_id(g.user.id))
+        return model.get_jobs_by_user_id(g.user.id)
 
     @auth.login_required
     @api.expect(parsers.upload_parser)
@@ -179,65 +229,54 @@ class Jobs(Resource):
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return the new job')
     def post(self):
-        args = parsers.upload_parser.parse_args()#
+        args = parsers.upload_parser.parse_args()
         # check if the sent file is actually a video.
         if not args['video'].mimetype == 'video/mp4':
             abort(415)
         with Connection(conn):
             q = Queue()
-            task = q.enqueue(convert, video=args['video'].read(), user_id=str(g.user.id))
-            return {"job_id" : task.get_id()}
+            task = q.enqueue(convert, video=args['video'].read(), user_id=str(g.user.id), job_name=args['name'])
+            # TODO: Marshal differently because job has just started.
+            return {'status': 'enqueued','id': task.id}
 
 
-@jobs_space.route("/<uuid:job_id>")
+@jobs_space.route("/<uuid:id>")
 @api.response(401, 'The user is not permitted to do this action')
 class Job(Resource):
     """
     Job status
     """
-
     # get via id
+    @jobs_space.marshal_with(jobs_marshal)
     @auth.login_required
     @api.response(404, 'A job with the given id was not found')
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return the new job')
-    def get(self, job_id):
-        return get_job(job_id).serialize()
+    def get(self, id):
+        job = get_job(id)
+        return job
+
+
+@jobs_space.route("/<uuid:id>/source_video")
+class JobSourceVideo(Resource):
+    @auth.login_required
+    @api.produces(["video/mp4"])
+    @api.response(200, 'Return video file')
+    def get(self, id):
+        # check if job exists
+        job = model.get_job_by_id(id)
+        directory = os.path.join(Config.CACHE_DIR, job.file_directory)
+        # check if result is succesful
+        try:
+            return send_from_directory(directory, Config.SOURCE_VIDEO_FILE,
+                                       as_attachment=True, mimetype="video/mp4")
+        except Exception as e:
+            raise FileNotFoundError
 
 
 class ResultFailedException(HTTPException):
     code = 404
     description = "Result has failed, hence there is no video"
-
-
-@jobs_space.route("/<uuid:job_id>/source_video")
-class JobSourceVideo(Resource):
-    @auth.login_required
-    @api.produces(["video/mp4"])
-    @api.response(200, 'Return video file')
-    def get(self, job_id):
-        # check if job exists
-        job = get_job(job_id)
-        # get the result
-        res = model.get_result_by_job_id(job.id)
-        # check if result is succesful
-        return send_from_directory(res.file_directory, Config.SOURCE_VIDEO_FILE, as_attachment=True,
-                                   mimetype="video/mp4")
-
-
-@jobs_space.route("/<uuid:job_id>/output_video")
-class JobOutputVideo(Resource):
-    @auth.login_required
-    @api.produces(["video/mp4"])
-    @api.response(200, 'Return video file')
-    def get(self, job_id):
-        # check if job exists
-        job = get_job(job_id)
-        # get the result
-        res = model.get_result_by_job_id(job.id)
-        # check if result is succesful
-        return send_from_directory(res.file_directory, Config.OUTPUT_VIDEO_FILE, as_attachment=True,
-                                   mimetype="video/mp4")
 
 
 def start_job(job_id, **kwargs):
@@ -252,26 +291,59 @@ Results Space
 results_space = api.namespace('results', description='Results')
 
 
-@results_space.route("/<uuid:result_id>")
+@results_space.route("/<uuid:id>")
 class Result(Resource):
     @auth.login_required
+    @results_space.marshal_with(results_marshal)
     @api.response(404, 'A result with the given id was not found')
     @api.response(200, 'Return the new job')
     @api.response(401, 'The user is not permitted to do this action')
-    def get(self, result_id):
-        return model.get_result_by_id(result_id).serialize()
+    def get(self, id):
+        return model.get_result_by_id(id)
 
 
 @results_space.route("/")
 class Results(Resource):
     @auth.login_required
+    @results_space.marshal_list_with(results_marshal)
     @api.response(200, 'Return all the results that match to the given parameters')
     @api.response(401, 'The user is not permitted to do this action')
-    @api.expect(parsers.results_parser)
     def get(self):
-        args = parsers.results_parser.parse_args()
-        return model.serialize_array(model.filter_results(g.user.id, args))
+        return model.filter_results(g.user.id)
 
+
+@results_space.route("/<uuid:id>/output_video")
+class ResultOutputVideo(Resource):
+    @auth.login_required
+    @api.produces(["video/mp4"])
+    @api.response(200, 'Return video file')
+    def get(self, id):
+        # TODO: Generalize this function
+        result = model.get_result_by_id(id)
+        if result is None:
+            return 404
+        if result.result_code is not model.ResultCode.success:
+            return 202
+        path = os.path.join(Config.CACHE_DIR, str(result.id), Config.RESULT_DIR)
+        return send_from_directory(path, Config.OUTPUT_VIDEO_FILE, as_attachment=True, attachment_filename=str(result.id) + ".mp4",
+                                   mimetype="video/mp4")
+
+
+@results_space.route("/<uuid:id>/bvh")
+class ResultBvhFile(Resource):
+    @auth.login_required
+    # TODO: RIchtigen mime type finden
+    @api.produces(["application/octet-stream"])
+    @api.response(200, 'Return bvh file')
+    def get(self, id):
+        result = model.get_result_by_id(id)
+        if result is None:
+            return 404
+        if result.result_code is not model.ResultCode.success:
+            return 202
+        path = os.path.join(Config.CACHE_DIR, str(result.id), Config.RESULT_DIR)
+        return send_from_directory(path, Config.OUTPUT_BVH_FILE, as_attachment=True, attachment_filename=str(result.id) + ".bvh",
+                                       mimetype="application/octet-stream")
 
 """
 Posts space
@@ -285,8 +357,8 @@ posts_space = api.namespace('posts', description='Posts feed')
 class Posts(Resource):
     @api.response(200, 'Return the first 100 public posts')
     def get(self):
-        return model.serialize_array(model.get_all_public_posts())
+        return model.get_all_public_posts()
 
-# TODO: Put this into "manager"
-model.db.init_app(app)
+
 model.db.create_all()
+model.db.init_app(app)

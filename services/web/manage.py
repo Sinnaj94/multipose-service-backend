@@ -4,6 +4,8 @@ from rq import Connection, Worker
 from project.app import app
 import redis
 
+from project.model import model
+
 cli = FlaskGroup(app)
 
 
@@ -17,4 +19,5 @@ def run_worker():
 
 
 if __name__ == "__main__":
+    # TODO: Put this into "manager"
     cli()
