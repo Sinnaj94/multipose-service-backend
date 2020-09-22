@@ -4,8 +4,13 @@ import string
 from flask_restplus import reqparse
 import werkzeug
 
+post_job_parser = reqparse.RequestParser()
+post_job_parser.add_argument('name', default="My Job", type=str, location='form')
+
+get_jobs_parser = reqparse.RequestParser()
+get_jobs_parser.add_argument('result_code', required=False, type=int, choices=[-1, 0, 1])
+
 upload_parser = reqparse.RequestParser()
-upload_parser.add_argument('name', default="My Job", type=str)
 upload_parser.add_argument('video',
                            type=werkzeug.datastructures.FileStorage,
                            location='files',

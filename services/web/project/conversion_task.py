@@ -31,11 +31,15 @@ def analyse_2d(job_cache_dir, persist=True):
     i = 0
     job = get_current_job()
     bar.start()
+    thumbnail = None
     while True:
         ret, frame = cap.read()
         if not ret:
             break
             # analyse frame
+        if i == 0:
+            # create a thumbnail
+            thumbnail = frame
         img_height = frame.shape[0]
         img_width = frame.shape[1]
         # all keypoints
@@ -56,7 +60,7 @@ def analyse_2d(job_cache_dir, persist=True):
     cap.release()
     config = {'img_width': img_width, 'img_height': img_height, 'frames': video_length, 'fps': fps}
 
-    return keypoints_list, config
+    return keypoints_list, config, thumbnail
 
 
 def analyse_3d(pose2d, conf, result_cache_dir):
@@ -97,17 +101,12 @@ def export_video(pose3d_world, video_file, config, fps=60):
     )
 
 
-def convert(video, user_id, job_name):
+def convert(video):
     from project.model import model
     job_id = str(get_current_job().get_id())
     # add to database
     job_cache_dir = Path(os.path.join(Config.CACHE_DIR, job_id))
 
-    # TODO: Maybe i can delete file_directory, as it is the file directory.
-    model.add_job(**{"job_id": job_id,
-                     "user_id": user_id,
-                     "name": job_name,
-                     "file_directory": str(job_id)})
     # The cache dir will look like that : cache/aabb-ccc-dddd-fff-ggg/ (UUID)
     # Create a directory where the cache is stored.
     if not job_cache_dir.exists():
@@ -120,8 +119,7 @@ def convert(video, user_id, job_name):
     file.close()
 
     # result
-    result = model.add_result(**{"id": job_id,
-                                 "user_id": user_id})
+    result = model.get_result_by_id(get_current_job().get_id())
 
     model.db.session.commit()
 
@@ -132,16 +130,28 @@ def convert(video, user_id, job_name):
 
     pose2d_file = result_cache_dir / Config.DATA_2D_FILE
     pose3d_file = result_cache_dir / Config.DATA_3D_FILE
+    thumbnail_path = job_cache_dir / Config.THUMBNAIL_FILE
+
+    # create a thumbnail
+    job = get_current_job()
+    job.meta['stage'] = {'name': 'thumbnail'}
+    job.save_meta()
+
+    cap = cv2.VideoCapture(str(job_cache_dir / Config.SOURCE_VIDEO_FILE))
+    success, image = cap.read()
+    cv2.imwrite(str(thumbnail_path), image)
+
+    cap.release()
+
     pose3d_world = None
     points_list = None
-    job = get_current_job()
     job.meta['stage'] = {'name': '2d', 'progress' : 0}
     job.save_meta()
 
     if not pose2d_file.exists() or not Config.CACHE_RESULTS:
         print("Beginning to 2d analyse job %s" % job_id)
 
-        points_list, config_2d = analyse_2d(job_cache_dir)
+        points_list, config_2d, thumbnail = analyse_2d(job_cache_dir)
 
         points_list = smooth.filter_missing_value(
             keypoints_list=points_list,

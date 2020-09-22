@@ -12,8 +12,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import generate_password_hash, check_password_hash
-
-from project.app import app
+from project.app import app, ResultCode
 
 db = SQLAlchemy(app)
 
@@ -84,18 +83,12 @@ class Posts(db.Model):
 class Jobs(db.Model):
     __tablename_ = 'jobs'
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
-    result = relationship("Results", backref="jobs")
+    result = relationship("Results", backref="jobs", uselist=False)
     name = db.Column(db.String, nullable=False)
-    file_directory = db.Column(db.String)
     user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    video_uploaded = db.Column(db.Boolean, default=False)
     # Date updated
     date_updated = db.Column(db.TIMESTAMP, default=datetime.now())
-
-
-class ResultCode(enum.Enum):
-    success = 1
-    failure = 0
-    pending = -1
 
 
 class Results(db.Model):
@@ -112,11 +105,18 @@ db.create_all()
 EVENT LISTENERS
 """
 
+@db.event.listens_for(Jobs, "after_insert")
+def create_result(mapper, connection, target):
+    re = Results.__table__
+    connection.execute(re.insert().values(id=target.id, user_id=target.user_id))
+
 
 @db.event.listens_for(Results, "after_insert")
 def notify_observers(mapper, connection, target):
     app.logger.debug("New waiting result was inserted. Notifying app.")
     # notify_analysis()
+
+
 
 
 """methods"""
@@ -145,12 +145,10 @@ def retrieve_job(job_id):
 
 
 def add_job(**kwargs):
-    # todo: authentication
-    job = Jobs(id=kwargs['job_id'],user_id=kwargs['user_id'], name=kwargs['name'],
-               file_directory=kwargs['file_directory'])
+    job = Jobs(user_id=kwargs['user_id'], name=kwargs['name'])
     db.session.add(job)
     db.session.commit()
-    return job.id
+    return job
 
 
 def get_jobs(user_id):
@@ -168,8 +166,13 @@ def get_result_by_job_id(job_id):
     return db.session.query(Results).filter_by(job_id=job_id).first()
 
 
-def get_jobs_by_user_id(user_id):
-    return db.session.query(Jobs).filter_by(user_id=user_id).all()
+def get_jobs_by_user_id(user_id, **kwargs):
+
+    jobs = db.session.query(Jobs).filter_by(user_id=user_id)
+    if kwargs['result_code'] is not None:
+        jobs = jobs.join(Results, Jobs.result).filter(
+            Results.result_code == ResultCode(kwargs['result_code']))
+    return jobs.all()
 
 
 def serialize_array(ar):

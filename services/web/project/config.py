@@ -21,6 +21,7 @@ class Config(object):
     # POSSIBILITIES: CMU / H36M
     EXPORT_FORMAT = "CMU"
     SOURCE_VIDEO_FILE = "source_video.mp4"
+    THUMBNAIL_FILE = "thumbnail.jpg"
     OUTPUT_VIDEO_FILE = "output_video.mp4"
     OUTPUT_BVH_FILE = "output_bvh.bvh"
     DATA_2D_FILE = "data_2d.npy"

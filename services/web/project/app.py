@@ -1,4 +1,5 @@
 #!flask/bin/python
+import enum
 import os
 import time
 
@@ -8,9 +9,7 @@ from rq.exceptions import NoSuchJobError
 from flask import Flask, Blueprint, g, jsonify, send_from_directory
 from flask_restplus import Api, Resource, abort, fields
 from werkzeug.exceptions import HTTPException
-
 from project import parsers
-
 from rq import Queue, Connection
 
 # authentication
@@ -35,10 +34,18 @@ api = Api(app=app,
           title="Motion Capturing API",
           description="Motion Capturing Library from single RGB Videos")
 
+
+# TODO: Success = 1; Pending = 0; Failure = -1
+class ResultCode(enum.IntEnum):
+    success = 1
+    failure = -1
+    pending = 0
+
+
 # import marshallers
 results_marshal = api.model('Result', {
     'id': fields.String,
-    'result_code': fields.String,
+    'result_code': fields.Integer(description="Result Code - Success: 1; Failure: 0; Pending: -1"),
     'date': fields.DateTime(dt_format='rfc822'),
     'output_video_url': fields.Url('results_result_output_video'),
     'output_bvh': fields.Url('results_result_bvh_file')
@@ -48,8 +55,11 @@ jobs_marshal = api.model('Job', {
     # TODO: Show user name
     'id': fields.String,
     'name': fields.String,
+    'video_uploaded': fields.Boolean,
     'date_updated': fields.DateTime(dt_format='rfc822'),
+    'upload_job_url': fields.Url('jobs_job_upload_video'),
     'input_video_url': fields.Url('jobs_job_source_video'),
+    'thumbnail_url': fields.Url('jobs_job_thumbnail'),
     'result': fields.Nested(results_marshal),
 })
 user_metadata_marshal = api.model('UserMetadata', {
@@ -59,12 +69,11 @@ user_metadata_marshal = api.model('UserMetadata', {
     'email': fields.String
 })
 user_marshal = api.model('User', {
-    'id' : fields.String,
-    'username' : fields.String,
-    'registration_date' : fields.DateTime(dt_format='rfc822'),
+    'id': fields.String,
+    'username': fields.String,
+    'registration_date': fields.DateTime(dt_format='rfc822'),
     'user_metadata': fields.Nested(user_metadata_marshal)
 })
-
 
 app.register_blueprint(blueprint)
 
@@ -192,23 +201,22 @@ Jobs Space
 jobs_space = api.namespace('jobs', description='Jobs')
 
 
-class JobRunning(HTTPException):
-    code = 202
+class JobDoesNotExist(HTTPException):
+    code = 404
     description = "Job is pending"
 
 
-def get_job(id):
+def get_job_status(id):
     try:
         job = RedisJob.fetch(str(id), connection=conn)
-    # if the server was restarted or job not found, it might still be in database
     except NoSuchJobError as e:
-        return model.retrieve_job(id)
+        if model.get_result_by_id(id):
+            return {"finished": True}
+        return {"message": "job not found"}, 404
     if job.is_finished:
-        return model.retrieve_job(id)
+        return {"finished": True}
     else:
-        e = JobRunning
-        e.data = {"stage" : job.meta['stage']}
-        raise e
+        return {"stage": job.meta['stage'], "finished": False}, 202
 
 
 @jobs_space.route("/")
@@ -216,28 +224,54 @@ class Jobs(Resource):
     """
     Job status
     """
+
     @auth.login_required
-    @jobs_space.marshal_list_with(jobs_marshal, envelope="jobs")
+    @jobs_space.marshal_list_with(jobs_marshal)
+    @api.expect(parsers.get_jobs_parser)
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return all jobs belonging to the authorized user')
     def get(self):
-        return model.get_jobs_by_user_id(g.user.id)
+        args = parsers.get_jobs_parser.parse_args()
+        jobs = model.get_jobs_by_user_id(g.user.id, **args)
+        return jobs
 
     @auth.login_required
-    @api.expect(parsers.upload_parser)
+    @api.expect(parsers.post_job_parser)
     @api.doc('get_something')
+    @jobs_space.marshal_with(jobs_marshal)
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return the new job')
     def post(self):
+        args = parsers.post_job_parser.parse_args()
+        job = model.add_job(**{"user_id": g.user.id,"name": args['name']})
+        print(str(job.id))
+        return job
+
+
+@jobs_space.route("/<uuid:id>/upload")
+class JobUploadVideo(Resource):
+    @auth.login_required
+    @api.expect(parsers.upload_parser)
+    @jobs_space.marshal_with(jobs_marshal)
+    @api.response(401, 'The user is not permitted to do this action')
+    @api.response(200, 'Return the new job')
+    @api.response(404, 'Job not found')
+    def put(self, id):
         args = parsers.upload_parser.parse_args()
         # check if the sent file is actually a video.
         if not args['video'].mimetype == 'video/mp4':
             abort(415)
+        job = model.get_job_by_id(id)
+        if job is None:
+            abort(404)
+        elif job.video_uploaded is True:
+            abort(409, "Video has been uploaded already")
         with Connection(conn):
             q = Queue()
-            task = q.enqueue(convert, video=args['video'].read(), user_id=str(g.user.id), job_name=args['name'])
-            # TODO: Marshal differently because job has just started.
-            return {'status': 'enqueued','id': task.id}
+            q.enqueue(convert, job_id=str(job.id), video=args['video'].read())
+            job.video_uploaded = True
+            model.db.session.commit()
+            return job
 
 
 @jobs_space.route("/<uuid:id>")
@@ -246,6 +280,7 @@ class Job(Resource):
     """
     Job status
     """
+
     # get via id
     @jobs_space.marshal_with(jobs_marshal)
     @auth.login_required
@@ -253,8 +288,24 @@ class Job(Resource):
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return the new job')
     def get(self, id):
-        job = get_job(id)
-        return job
+        return model.retrieve_job(id)
+
+
+@jobs_space.route("/<uuid:id>/status")
+@api.response(401, 'The user is not permitted to do this action')
+class JobStatus(Resource):
+    """
+    Job status
+    """
+
+    # get via id
+    @auth.login_required
+    @api.response(404, 'A job with the given id was not found')
+    @api.response(401, 'The user is not permitted to do this action')
+    @api.response(200, 'Return the new job')
+    def get(self, id):
+        # TODO: Authentication
+        return get_job_status(id)
 
 
 @jobs_space.route("/<uuid:id>/source_video")
@@ -262,17 +313,37 @@ class JobSourceVideo(Resource):
     @auth.login_required
     @api.produces(["video/mp4"])
     @api.response(200, 'Return video file')
+    @api.response(404, 'Not found')
     def get(self, id):
         # check if job exists
         job = model.get_job_by_id(id)
-        directory = os.path.join(Config.CACHE_DIR, job.file_directory)
+        directory = os.path.join(Config.CACHE_DIR, str(job.id))
         # check if result is succesful
+        if not job.video_uploaded:
+            # TODO: Make this better
+            abort(404, "Video has not been uploaded yet.")
         try:
             return send_from_directory(directory, Config.SOURCE_VIDEO_FILE,
                                        as_attachment=True, mimetype="video/mp4")
         except Exception as e:
             raise FileNotFoundError
 
+
+@jobs_space.route("/<uuid:id>/thumbnail")
+class JobThumbnail(Resource):
+    @auth.login_required
+    @api.produces(["video/mp4"])
+    @api.response(200, 'Return video file')
+    def get(self, id):
+        # check if job exists
+        job = model.get_job_by_id(id)
+        directory = os.path.join(Config.CACHE_DIR, str(job.id))
+        # check if result is succesful
+        try:
+            return send_from_directory(directory, Config.THUMBNAIL_FILE,
+                                       as_attachment=True, mimetype="image/jpeg")
+        except Exception as e:
+            raise FileNotFoundError
 
 class ResultFailedException(HTTPException):
     code = 404
@@ -325,7 +396,8 @@ class ResultOutputVideo(Resource):
         if result.result_code is not model.ResultCode.success:
             return 202
         path = os.path.join(Config.CACHE_DIR, str(result.id), Config.RESULT_DIR)
-        return send_from_directory(path, Config.OUTPUT_VIDEO_FILE, as_attachment=True, attachment_filename=str(result.id) + ".mp4",
+        return send_from_directory(path, Config.OUTPUT_VIDEO_FILE, as_attachment=True,
+                                   attachment_filename=str(result.id) + ".mp4",
                                    mimetype="video/mp4")
 
 
@@ -342,8 +414,10 @@ class ResultBvhFile(Resource):
         if result.result_code is not model.ResultCode.success:
             return 202
         path = os.path.join(Config.CACHE_DIR, str(result.id), Config.RESULT_DIR)
-        return send_from_directory(path, Config.OUTPUT_BVH_FILE, as_attachment=True, attachment_filename=str(result.id) + ".bvh",
-                                       mimetype="application/octet-stream")
+        return send_from_directory(path, Config.OUTPUT_BVH_FILE, as_attachment=True,
+                                   attachment_filename=str(result.id) + ".bvh",
+                                   mimetype="application/octet-stream")
+
 
 """
 Posts space
