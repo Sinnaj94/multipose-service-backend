@@ -1,6 +1,10 @@
+import time
+
 from rq.job import get_current_job
 
 import progressbar
+import torch
+import skvideo.io
 import cv2
 import numpy as np
 import os
@@ -11,38 +15,27 @@ from matplotlib.animation import FuncAnimation
 from video2bvh.pose_estimator_2d import openpose_estimator
 from video2bvh.pose_estimator_3d import estimator_3d
 from video2bvh.utils import smooth, vis, camera
-from video2bvh.bvh_skeleton import h36m_skeleton, cmu_skeleton
+from video2bvh.bvh_skeleton import h36m_skeleton, cmu_skeleton, openpose_skeleton
 
 from project.config import Config
 
 
-def analyse_2d(job_cache_dir, persist=True):
+def analyse_2d(job_cache_dir, thumbnail_path, persist=True):
     # get model
     e2d = openpose_estimator.OpenPoseEstimator(model_folder=Config.OPENPOSE_MODELS_PATH)
-
-    cap = cv2.VideoCapture(str(job_cache_dir / Config.SOURCE_VIDEO_FILE))
-    video_length = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
+    videogen = skvideo.io.FFmpegReader(str(job_cache_dir / Config.SOURCE_VIDEO_FILE))
     keypoints_list = []
-    img_width, img_height = None, None
-    # progess bar visualizes
-    bar = progressbar.ProgressBar(maxval=video_length,
-                                  widgets=[progressbar.Bar('=', '[', ']'), ' ', progressbar.Percentage()])
+
+    (video_length, img_height, img_width, _) = videogen.getShape()
     i = 0
     job = get_current_job()
-    bar.start()
+
     thumbnail = None
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-            # analyse frame
+    for frame in videogen.nextFrame():
         if i == 0:
             # create a thumbnail
-            thumbnail = frame
-        img_height = frame.shape[0]
-        img_width = frame.shape[1]
-        # all keypoints
+            skvideo.io.vwrite(str(thumbnail_path), frame)
+
         all_keypoints = e2d.estimate(img_list=[frame])
 
         keypoints = all_keypoints[0]
@@ -52,13 +45,13 @@ def analyse_2d(job_cache_dir, persist=True):
             # todo: What to do if keypoints list has multiple persons?
             keypoints_list.append(keypoints[0])
         i += 1
-        bar.update(i)
         # save progress
         job.meta['stage']['progress'] = round(i / video_length, 2)
         job.save_meta()
 
-    cap.release()
-    config = {'img_width': img_width, 'img_height': img_height, 'frames': video_length, 'fps': fps}
+    videogen.close()
+    # todo: GET FPS FROM META
+    config = {'img_width': img_width, 'img_height': img_height, 'frames': video_length, 'fps': 60}
 
     return keypoints_list, config, thumbnail
 
@@ -101,6 +94,31 @@ def export_video(pose3d_world, video_file, config, fps=60):
     )
 
 
+def export_video_2d(keypoints_list, video_file, output_dir):
+    cap = cv2.VideoCapture(str(video_file))
+    print(video_file.exists())
+    vis_result_dir = output_dir / '2d_pose_vis' # path to save the visualized images
+    if not vis_result_dir.exists():
+        os.makedirs(vis_result_dir)
+
+    op_skel = openpose_skeleton.OpenPoseSkeleton()
+
+    for i, keypoints in enumerate(keypoints_list):
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # keypoint whose detect confidence under kp_thresh will not be visualized
+        vis.vis_2d_keypoints(
+            keypoints=keypoints,
+            img=frame,
+            skeleton=op_skel,
+            kp_thresh=0.4,
+            output_file=vis_result_dir / f'{i:04d}.png'
+        )
+    cap.release()
+
+
 def convert(video):
     from project.model import model
     job_id = str(get_current_job().get_id())
@@ -117,7 +135,6 @@ def convert(video):
     with(open(filename, 'wb')) as file:
         file.write(video)
     file.close()
-
     # result
     result = model.get_result_by_id(get_current_job().get_id())
 
@@ -137,12 +154,6 @@ def convert(video):
     job.meta['stage'] = {'name': 'thumbnail'}
     job.save_meta()
 
-    cap = cv2.VideoCapture(str(job_cache_dir / Config.SOURCE_VIDEO_FILE))
-    success, image = cap.read()
-    cv2.imwrite(str(thumbnail_path), image)
-
-    cap.release()
-
     pose3d_world = None
     points_list = None
     job.meta['stage'] = {'name': '2d', 'progress' : 0}
@@ -151,12 +162,13 @@ def convert(video):
     if not pose2d_file.exists() or not Config.CACHE_RESULTS:
         print("Beginning to 2d analyse job %s" % job_id)
 
-        points_list, config_2d, thumbnail = analyse_2d(job_cache_dir)
+        points_list, config_2d, thumbnail = analyse_2d(job_cache_dir, thumbnail_path)
 
         points_list = smooth.filter_missing_value(
             keypoints_list=points_list,
             method='ignore'
         )
+
         if not points_list:
             print("Job analysis failed.")
             result.result_code = model.ResultCode.failure
@@ -164,10 +176,15 @@ def convert(video):
             return False
         pose2d = np.stack(points_list)[:, :, :2]
         print("Finished to 2d analyse job %s" % job_id)
-
+        print("---")
+        print("2D Rendering the video")
+        job.meta['stage'] = {'name': '2d render', 'progress' : None}
+        export_video_2d(points_list, filename, result_cache_dir / "imgs")
+        print("2D Rendering finished")
         if Config.CACHE_RESULTS:
             np.save(result_cache_dir / '2d_pose.npy', pose2d)
             np.save(result_cache_dir / '2d_config.npy', config_2d)
+
     else:
         print("Found 2d Cache for %s" % job_id)
         pose2d = np.load(pose2d_file).values()

@@ -2,6 +2,7 @@ from flask.cli import FlaskGroup
 from rq import Connection, Worker
 
 from project.app import app
+from project.model import model
 import redis
 
 from project.model import model
@@ -16,6 +17,11 @@ def run_worker():
     with Connection(redis_connection):
         worker = Worker(app.config["QUEUES"])
         worker.work()
+
+
+@cli.command("create_db")
+def create_db():
+    model.db.create_all()
 
 
 if __name__ == "__main__":

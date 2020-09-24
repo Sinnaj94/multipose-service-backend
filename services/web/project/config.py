@@ -8,6 +8,7 @@ class Config(object):
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite://")
     SQLALCHEMY_COMMIT_ON_TEARDOWN = True
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    DEBUG = True
     SECRET_KEY = os.getenv("SECRET_KEY")
     VIDEO_DIR = "./data/jobs"
     CACHE_DIR = "/usr/data"

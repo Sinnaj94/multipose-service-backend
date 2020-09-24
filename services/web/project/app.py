@@ -8,7 +8,7 @@ from rq.job import Job as RedisJob
 from rq.exceptions import NoSuchJobError
 from flask import Flask, Blueprint, g, jsonify, send_from_directory
 from flask_restplus import Api, Resource, abort, fields
-from werkzeug.exceptions import HTTPException
+from werkzeug.exceptions import HTTPException, NotFound
 from project import parsers
 from rq import Queue, Connection
 
@@ -35,6 +35,7 @@ api = Api(app=app,
           description="Motion Capturing Library from single RGB Videos")
 
 
+from rq import cancel_job
 # TODO: Success = 1; Pending = 0; Failure = -1
 class ResultCode(enum.IntEnum):
     success = 1
@@ -43,10 +44,22 @@ class ResultCode(enum.IntEnum):
 
 
 # import marshallers
+stage_marshal = api.model('Stage', {
+    'progress' : fields.Float(),
+    'name': fields.String()
+})
+
+status_marshal = api.model('Status', {
+    'finished': fields.Boolean,
+    'stage': fields.Nested(stage_marshal),
+    'problem': fields.Boolean
+})
+
+
 results_marshal = api.model('Result', {
     'id': fields.String,
     'result_code': fields.Integer(description="Result Code - Success: 1; Failure: 0; Pending: -1"),
-    'date': fields.DateTime(dt_format='rfc822'),
+    'date': fields.DateTime(dt_format='iso8601'),
     'output_video_url': fields.Url('results_result_output_video'),
     'output_bvh': fields.Url('results_result_bvh_file')
 
@@ -210,13 +223,21 @@ def get_job_status(id):
     try:
         job = RedisJob.fetch(str(id), connection=conn)
     except NoSuchJobError as e:
-        if model.get_result_by_id(id):
-            return {"finished": True}
+        res = model.get_result_by_id(id)
+        if res:
+            if res.result_code == ResultCode.pending:
+                return {"finished": False}
+            else:
+                return {"finished" : True}
         return {"message": "job not found"}, 404
     if job.is_finished:
         return {"finished": True}
     else:
-        return {"stage": job.meta['stage'], "finished": False}, 202
+        if job.is_failed:
+            return {"finished": False, "problem": True}
+        if 'stage' in job.meta:
+            return {"stage": job.meta['stage'], "finished": False}
+        return {"stage": {"name": "pending"}, "finished": False}
 
 
 @jobs_space.route("/")
@@ -277,10 +298,6 @@ class JobUploadVideo(Resource):
 @jobs_space.route("/<uuid:id>")
 @api.response(401, 'The user is not permitted to do this action')
 class Job(Resource):
-    """
-    Job status
-    """
-
     # get via id
     @jobs_space.marshal_with(jobs_marshal)
     @auth.login_required
@@ -288,7 +305,24 @@ class Job(Resource):
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return the new job')
     def get(self, id):
-        return model.retrieve_job(id)
+        job = model.get_job_by_id(id)
+        if job is None:
+            abort(404, "The resource was not found.")
+        return job
+
+    def delete(self, id):
+        try:
+            job = RedisJob.fetch(str(id), connection=conn)
+            if job.is_failed:
+                cancel_job(job.get_id)
+                job = model.retrieve_job(id)
+                return model.delete_job(job)
+            if not job.is_finished:
+                return {"message": "The job is currently working."}, 409
+        except NoSuchJobError:
+            job = model.retrieve_job(id)
+            return model.delete_job(job)
+
 
 
 @jobs_space.route("/<uuid:id>/status")
@@ -300,12 +334,14 @@ class JobStatus(Resource):
 
     # get via id
     @auth.login_required
+    @jobs_space.marshal_with(status_marshal)
     @api.response(404, 'A job with the given id was not found')
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return the new job')
     def get(self, id):
         # TODO: Authentication
         return get_job_status(id)
+
 
 
 @jobs_space.route("/<uuid:id>/source_video")
@@ -319,14 +355,11 @@ class JobSourceVideo(Resource):
         job = model.get_job_by_id(id)
         directory = os.path.join(Config.CACHE_DIR, str(job.id))
         # check if result is succesful
-        if not job.video_uploaded:
-            # TODO: Make this better
-            abort(404, "Video has not been uploaded yet.")
         try:
             return send_from_directory(directory, Config.SOURCE_VIDEO_FILE,
                                        as_attachment=True, mimetype="video/mp4")
         except Exception as e:
-            raise FileNotFoundError
+            abort(404)
 
 
 @jobs_space.route("/<uuid:id>/thumbnail")
@@ -342,8 +375,9 @@ class JobThumbnail(Resource):
         try:
             return send_from_directory(directory, Config.THUMBNAIL_FILE,
                                        as_attachment=True, mimetype="image/jpeg")
-        except Exception as e:
-            raise FileNotFoundError
+        except NotFound as e:
+            abort(404)
+
 
 class ResultFailedException(HTTPException):
     code = 404
@@ -434,5 +468,4 @@ class Posts(Resource):
         return model.get_all_public_posts()
 
 
-model.db.create_all()
 model.db.init_app(app)

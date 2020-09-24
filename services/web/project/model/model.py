@@ -99,8 +99,6 @@ class Results(db.Model):
     date = db.Column(db.TIMESTAMP, default=datetime.now(), nullable=False)
 
 
-db.create_all()
-
 """
 EVENT LISTENERS
 """
@@ -266,3 +264,9 @@ def get_job_by_id(id):
 
 def get_job_by_result_id(id):
     return db.session.query(Jobs).join(Results, Jobs.result).filter(Results.id == id).first()
+
+
+def delete_job(job):
+    get_result_by_id(job.id).query.delete()
+    job.query.delete()
+    return True
