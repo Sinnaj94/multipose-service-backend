@@ -1,12 +1,16 @@
 #!flask/bin/python
 import enum
+import io
 import os
+import pathlib
 import time
+import zipfile
 
 import redis
 from rq.job import Job as RedisJob
 from rq.exceptions import NoSuchJobError
-from flask import Flask, Blueprint, g, jsonify, send_from_directory
+from flask import Flask, Blueprint, g, jsonify, send_from_directory, url_for, make_response, render_template, redirect, \
+    send_file
 from flask_restplus import Api, Resource, abort, fields
 from werkzeug.exceptions import HTTPException, NotFound
 from project import parsers
@@ -17,7 +21,7 @@ from flask_httpauth import HTTPBasicAuth
 
 # initialization
 from project.config import Config
-from project.conversion_task import convert
+from project.conversion_task import convert_openpose_baseline
 from project.parsers import user_metadata_parser
 
 app = Flask(__name__)
@@ -28,12 +32,11 @@ app.config.from_object(app_settings)
 # extensions
 auth = HTTPBasicAuth()
 
-blueprint = Blueprint('api', __name__)
-api = Api(app=app,
-          version="1.0",
-          title="Motion Capturing API",
-          description="Motion Capturing Library from single RGB Videos")
 
+blueprint = Blueprint('api', __name__, url_prefix='/api/v1', )
+api = Api(blueprint, description="Motion Capturing from single RGB-Video", version="1", title="MoCap API")
+
+app.register_blueprint(blueprint)
 
 from rq import cancel_job
 # TODO: Success = 1; Pending = 0; Failure = -1
@@ -60,8 +63,8 @@ results_marshal = api.model('Result', {
     'id': fields.String,
     'result_code': fields.Integer(description="Result Code - Success: 1; Failure: 0; Pending: -1"),
     'date': fields.DateTime(dt_format='iso8601'),
-    'output_video_url': fields.Url('results_result_output_video'),
-    'output_bvh': fields.Url('results_result_bvh_file')
+    'output_video_url': fields.Url('api.results_result_output_video'),
+    'output_bvh': fields.Url('api.results_result_bvh_file')
 
 })
 jobs_marshal = api.model('Job', {
@@ -70,9 +73,9 @@ jobs_marshal = api.model('Job', {
     'name': fields.String,
     'video_uploaded': fields.Boolean,
     'date_updated': fields.DateTime(dt_format='rfc822'),
-    'upload_job_url': fields.Url('jobs_job_upload_video'),
-    'input_video_url': fields.Url('jobs_job_source_video'),
-    'thumbnail_url': fields.Url('jobs_job_thumbnail'),
+    'upload_job_url': fields.Url('api.jobs_job_upload_video'),
+    'input_video_url': fields.Url('api.jobs_job_source_video'),
+    'thumbnail_url': fields.Url('api.jobs_job_thumbnail'),
     'result': fields.Nested(results_marshal),
 })
 user_metadata_marshal = api.model('UserMetadata', {
@@ -88,19 +91,21 @@ user_marshal = api.model('User', {
     'user_metadata': fields.Nested(user_metadata_marshal)
 })
 
-app.register_blueprint(blueprint)
-
 # queue building
 conn = redis.from_url(app.config["REDIS_URL"])
 
 # import
 import project.model.model as model
 
+# redirect
+@app.route("/")
+def redirect_to_api():
+    return redirect("/api/v1")
+
 """
 Status
 """
-
-status_space = api.namespace('status', description='Get the version status of the api')
+status_space = api.namespace('status', description='Get the version status of the api', blueprint=blueprint)
 
 
 @status_space.route("/")
@@ -113,7 +118,6 @@ class Status(Resource):
             'description': api.description,
             'id': 'motion_capturing_api'
         }
-
 
 """
 USER MANAGEMENT
@@ -289,7 +293,7 @@ class JobUploadVideo(Resource):
             abort(409, "Video has been uploaded already")
         with Connection(conn):
             q = Queue()
-            q.enqueue(convert, job_id=str(job.id), video=args['video'].read())
+            q.enqueue(convert_openpose_baseline, job_id=str(job.id), video=args['video'].read())
             job.video_uploaded = True
             model.db.session.commit()
             return job
@@ -333,7 +337,7 @@ class JobStatus(Resource):
     """
 
     # get via id
-    @auth.login_required
+    #@auth.login_required
     @jobs_space.marshal_with(status_marshal)
     @api.response(404, 'A job with the given id was not found')
     @api.response(401, 'The user is not permitted to do this action')
@@ -346,7 +350,7 @@ class JobStatus(Resource):
 
 @jobs_space.route("/<uuid:id>/source_video")
 class JobSourceVideo(Resource):
-    @auth.login_required
+    #@auth.login_required
     @api.produces(["video/mp4"])
     @api.response(200, 'Return video file')
     @api.response(404, 'Not found')
@@ -437,8 +441,7 @@ class ResultOutputVideo(Resource):
 
 @results_space.route("/<uuid:id>/bvh")
 class ResultBvhFile(Resource):
-    @auth.login_required
-    # TODO: RIchtigen mime type finden
+    #@auth.login_required
     @api.produces(["application/octet-stream"])
     @api.response(200, 'Return bvh file')
     def get(self, id):
@@ -451,6 +454,37 @@ class ResultBvhFile(Resource):
         return send_from_directory(path, Config.OUTPUT_BVH_FILE, as_attachment=True,
                                    attachment_filename=str(result.id) + ".bvh",
                                    mimetype="application/octet-stream")
+
+
+@results_space.route("/<uuid:id>/render_html")
+class ResultRenderHTML(Resource):
+    def get(self, id):
+        headers = {'Content-Type' : 'text/html'}
+        return make_response(render_template('bvh_import/index.html', current_url=url_for('api.results_result_bvh_file', id=id)), 200, headers)
+
+
+@results_space.route("/<uuid:id>/2d_data")
+class Result2DData(Resource):
+    def get(self, id):
+        result = model.get_result_by_id(id)
+        if result is None:
+            return 404
+        if result.result_code is not model.ResultCode.success:
+            return 202
+        path = os.path.join(Config.CACHE_DIR, str(result.id), 'results/imgs/2d_pose_vis')
+        # create zip
+        base_path = pathlib.Path(path)
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, mode = 'w') as z:
+            for f_name in base_path.iterdir():
+                z.write(f_name)
+        data.seek(0)
+        return send_file(
+            data,
+            mimetype='application/zip',
+            as_attachment=True,
+            attachment_filename=str(result.id)+'.zip'
+        )
 
 
 """

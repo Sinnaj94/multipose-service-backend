@@ -11,7 +11,7 @@ class Config(object):
     DEBUG = True
     SECRET_KEY = os.getenv("SECRET_KEY")
     VIDEO_DIR = "./data/jobs"
-    CACHE_DIR = "/usr/data"
+    CACHE_DIR = "."
     RESULT_DIR = "results"
     MODELS_3D_DIR = "./3d_models"
     OPENPOSE_MODELS_PATH = "/openpose/models"
@@ -25,6 +25,8 @@ class Config(object):
     THUMBNAIL_FILE = "thumbnail.jpg"
     OUTPUT_VIDEO_FILE = "output_video.mp4"
     OUTPUT_BVH_FILE = "output_bvh.bvh"
+    OUTPUT_BVH_FILE_RAW = "output_raw.bvh"
+    OUTPUT_BVH_FILE_FILTERED = "output_filtered.bvh"
     DATA_2D_FILE = "data_2d.npy"
     CONFIG_2D_FILE = "config_2d.npy"
     DATA_3D_FILE = "data_3d.npy"

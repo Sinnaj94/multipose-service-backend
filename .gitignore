@@ -143,3 +143,7 @@ virtualenvironment
 services/web/3d_models/best_58.58.pth
 services/web/3d_models/video_pose.yaml
 cache
+/services/web/mock_data/
+node_modules/
+bundle.js
+package-lock.json

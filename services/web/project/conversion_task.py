@@ -1,26 +1,24 @@
-import time
-
-from rq.job import get_current_job
-
-import progressbar
-import torch
-import skvideo.io
-import cv2
-import numpy as np
+import math
 import os
 from pathlib import Path
-# from IPython.display import HTML
-from matplotlib.animation import FuncAnimation
-
-from video2bvh.pose_estimator_2d import openpose_estimator
+from bvh_smooth.smooth_position import butterworth as pos_butterworth
+from bvh_smooth.smooth_rotation import butterworth as rot_butterworth
+import cv2
+import skvideo.io
+from rq.job import get_current_job
+from video2bvh.bvh_skeleton import h36m_skeleton, cmu_skeleton, openpose_skeleton
 from video2bvh.pose_estimator_3d import estimator_3d
 from video2bvh.utils import smooth, vis, camera
-from video2bvh.bvh_skeleton import h36m_skeleton, cmu_skeleton, openpose_skeleton
 
 from project.config import Config
+import numpy as np
+from video2bvh.bvh_skeleton import muco_3dhp_skeleton
+
+# from IPython.display import HTML
 
 
 def analyse_2d(job_cache_dir, thumbnail_path, persist=True):
+    from video2bvh.pose_estimator_2d import openpose_estimator
     # get model
     e2d = openpose_estimator.OpenPoseEstimator(model_folder=Config.OPENPOSE_MODELS_PATH)
     videogen = skvideo.io.FFmpegReader(str(job_cache_dir / Config.SOURCE_VIDEO_FILE))
@@ -94,10 +92,31 @@ def export_video(pose3d_world, video_file, config, fps=60):
     )
 
 
+def scale_world_3d(pose3d_world, scale_factor=.1):
+    return pose3d_world * scale_factor
+
+
+def get_rotation_matrix(axis, theta):
+    # Source: https://stackoverflow.com/questions/6802577/rotation-of-3d-vector/25709323
+    # Euler Rodrigues Formula
+    axis = np.asarray(axis)
+    axis = axis / math.sqrt(np.dot(axis, axis))
+    a = math.cos(theta / 2.0)
+    b, c, d = -axis * math.sin(theta / 2.0)
+    aa, bb, cc, dd = a * a, b * b, c * c, d * d
+    bc, ad, ac, ab, bd, cd = b * c, a * d, a * c, a * b, b * d, c * d
+    return np.array([[aa + bb - cc - dd, 2 * (bc + ad), 2 * (bd - ac)],
+                     [2 * (bc - ad), aa + cc - bb - dd, 2 * (cd + ab)],
+                     [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc]])
+
+
+def rotate_world_3d(pose3d_world, axis, radians):
+    return np.array([[np.dot(get_rotation_matrix(axis, radians), bone) for bone in frame] for frame in pose3d_world])
+
+
 def export_video_2d(keypoints_list, video_file, output_dir):
     cap = cv2.VideoCapture(str(video_file))
-    print(video_file.exists())
-    vis_result_dir = output_dir / '2d_pose_vis' # path to save the visualized images
+    vis_result_dir = output_dir / '2d_pose_vis'  # path to save the visualized images
     if not vis_result_dir.exists():
         os.makedirs(vis_result_dir)
 
@@ -119,7 +138,7 @@ def export_video_2d(keypoints_list, video_file, output_dir):
     cap.release()
 
 
-def convert(video):
+def convert_openpose_baseline(video):
     from project.model import model
     job_id = str(get_current_job().get_id())
     # add to database
@@ -156,7 +175,7 @@ def convert(video):
 
     pose3d_world = None
     points_list = None
-    job.meta['stage'] = {'name': '2d', 'progress' : 0}
+    job.meta['stage'] = {'name': '2d', 'progress': 0}
     job.save_meta()
 
     if not pose2d_file.exists() or not Config.CACHE_RESULTS:
@@ -178,7 +197,7 @@ def convert(video):
         print("Finished to 2d analyse job %s" % job_id)
         print("---")
         print("2D Rendering the video")
-        job.meta['stage'] = {'name': '2d render', 'progress' : None}
+        job.meta['stage'] = {'name': '2d render', 'progress': None}
         export_video_2d(points_list, filename, result_cache_dir / "imgs")
         print("2D Rendering finished")
         if Config.CACHE_RESULTS:
@@ -217,6 +236,8 @@ def convert(video):
 
     print("Generating a BVH file for %s" % job_id)
     bvh_file = result_cache_dir / Config.OUTPUT_BVH_FILE
+    pose3d_world = scale_world_3d(pose3d_world)
+    pose3d_world = rotate_world_3d(pose3d_world, [-1, 0, 0], math.pi * 90 / 180)
     if Config.EXPORT_FORMAT == "CMU":
         cmu_skel = cmu_skeleton.CMUSkeleton()
         channels, header = cmu_skel.poses2bvh(pose3d_world, output_file=bvh_file)
@@ -229,3 +250,88 @@ def convert(video):
     result.result_code = model.ResultCode.success
     model.db.session.commit()
     return True
+
+
+def analyse_xnect(video):
+    # TODO: COnvert XNECT VIDEO Via C++ and docker container
+    raw2d, raw3d, ik3d = "/home/worker/Repos/xnect/xnect-src/bin/Release/output/raw2D.txt",\
+                         "/home/worker/Repos/xnect/xnect-src/bin/Release/output/raw3D.txt",\
+                         "/home/worker/Repos/xnect/xnect-src/bin/Release/output/IK3D.txt"
+    return raw2d, raw3d, ik3d
+
+
+def convert_xnect(video):
+    job_id = "cache"
+    if get_current_job() is not None:
+        job_id = str(get_current_job().get_id())
+    job_cache_dir = Path(os.path.join(Config.CACHE_DIR, job_id))
+    result_cache_dir = Path(os.path.join(job_cache_dir, Config.RESULT_DIR))
+
+    raw2d, raw3d, ik3d = analyse_xnect(video)
+    pred = xnect_to_bvh(raw2d, raw3d, ik3d)
+
+    keypoints = []
+    last_cached = None
+    for idx in range(len(pred)):
+        # TODO: Interpolate more
+        if pred[idx]['valid_ik'][0]:
+            keypoints.append(pred[idx]["ik3d"][0] * 0.01)
+            last_cached = pred[idx]["ik3d"][0] * 0.01
+        else:
+            if last_cached is not None:
+                keypoints.append(last_cached)
+
+    # interpolation via scipy
+
+    print("Saving bvh")
+    skel = muco_3dhp_skeleton.Muco3DHPSkeleton()
+    raw = job_cache_dir / Config.OUTPUT_BVH_FILE_RAW
+    channels, header = skel.poses2bvh(np.array(keypoints), output_file=raw)
+    # smoothen
+    smoothened = job_cache_dir / Config.OUTPUT_BVH_FILE_FILTERED
+    rot_butterworth(raw, smoothened, border=1000)
+    pos_butterworth(smoothened, smoothened, border=1000)
+
+
+def xnect_to_bvh(raw2d_file, raw3d_file, ik3d_file):
+    p2d = np.loadtxt(raw2d_file)
+    p3d = np.loadtxt(raw3d_file)
+    i3d = np.loadtxt(ik3d_file)
+    num_people = int(np.max(p2d.T[1]) + 1)
+    print(num_people)
+    size = i3d.shape[0]
+    pred = []
+    pred_len = int(max(np.max(i3d.T[0]), np.max(p3d.T[0]))) + 1
+    for i in range(pred_len):
+        # set dictionary
+        pred.append({
+            "pred2d": np.zeros([num_people, 14, 2]),
+            "pred3d": np.zeros([num_people, 21, 3]),
+            "ik3d": np.zeros([num_people, 21, 3]),
+            "vis": np.zeros([num_people, 14, 1]),
+            "valid_raw": np.zeros([num_people], dtype=bool),
+            "valid_ik": np.zeros([num_people], dtype=bool)
+        })
+    # iterate through keyframes of p3d
+    for i in range(p3d.shape[0]):
+        idx = int(p2d[i][0])
+        pidx = int(p2d[i][1])
+        pred[idx]["pred2d"][pidx] = np.reshape(p2d[i][2:], [14, 2])
+        tmp = np.reshape(p3d[i][2:], [21, 3])
+
+        pred[idx]["pred3d"][pidx] = tmp - tmp[14]
+        pred[idx]["valid_raw"][pidx] = True
+        pred[idx]["vis"][pidx] = (np.greater(pred[idx]["pred2d"][pidx].T[0], 0) &
+                                  np.greater(pred[idx]["pred2d"][pidx].T[1], 0)).reshape([14, 1])
+
+    origin = None
+    for i in range(i3d.shape[0]):
+        idx = int(i3d[i][0])
+        pidx = int(i3d[i][1])
+        tmp = np.reshape(i3d[i][2:], [21, 3])
+        if origin is None:
+            direction_vector = tmp[13] - tmp[10]
+            origin = tmp[13] - direction_vector * .5
+        pred[idx]["ik3d"][pidx] = tmp - origin
+        pred[idx]["valid_ik"][pidx] = True
+    return pred
