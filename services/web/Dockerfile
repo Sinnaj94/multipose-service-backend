@@ -1,4 +1,6 @@
 FROM cwaffles/openpose AS openpose
+ENV LC_ALL C.UTF-8
+RUN apt-get update
 WORKDIR /openpose/build/python/openpose
 RUN make install
 

@@ -52,6 +52,26 @@ services:
       - POSTGRES_PASSWORD=CHANGE_THIS_TO_A_STRONG_PASSWORD
       - POSTGRES_DB=mocap
 
+  xnect:
+    container_name: xnect
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - DISPLAY=$DISPLAY
+      - QT_X11_NO_MITSHM=1
+    runtime: nvidia
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    build:
+      context: ./services/xnect
+      args:
+        - LEVEL_DB_VERSION=1.20
+    command:
+      - /bin/bash
+    stdin_open: true
+    tty: true
+    ports:
+      - 8080:8080
+
 volumes:
   postgres_data:
   file-cache:
