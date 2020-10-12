@@ -4,7 +4,7 @@ FROM nvidia/cuda:9.1-cudnn7-devel
 WORKDIR /
 RUN apt-get update && \
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-cmake git qt5-default libboost-all-dev autoconf autogen libhdf5-dev liblmdb-dev libsnappy-dev wget libatlas-base-dev libgflags-dev libgoogle-glog-dev liblmdb-dev python-pip libprotobuf-dev protobuf-compiler
+cmake git qt5-default libboost-all-dev autoconf autogen libhdf5-dev liblmdb-dev libsnappy-dev wget libatlas-base-dev libgflags-dev libgoogle-glog-dev liblmdb-dev python-pip libprotobuf-dev protobuf-compiler python-dev libxml2-dev libxslt-dev
 
 # install leveldb
 WORKDIR /tmp
@@ -59,9 +59,11 @@ RUN make -j 8
 WORKDIR /xnect
 COPY ./xnect_library/ /xnect/
 COPY ./src/ /xnect/src/
+COPY ./custom/ /xnect/custom/
 WORKDIR /xnect/build
 # clear cache
-RUN rm -r *
-RUN cmake -DOpenCV_DIR=/usr/lib/share/OpenCV  -DCaffe_DIR=/caffe/build ..
+ENV CPLUS_INCLUDE_PATH="$CPLUS_INCLUDE_PATH:/usr/include/python2.7/"
+RUN cmake -DOpenCV_DIR=/usr/lib/share/OpenCV  -DCaffe_DIR=/caffe/build -DCMAKE_BUILD_TYPE=Release ..
+RUN make clean
 RUN make -j8
 WORKDIR /xnect/bin/Release

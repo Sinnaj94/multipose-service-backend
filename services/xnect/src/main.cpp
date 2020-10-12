@@ -4,11 +4,11 @@
 #include <thread>
 #include <cstdlib>
 #include "xnect.hpp"
-
+#include "mongoose.h"
+#include "Server.hpp"
 #define WEB_CAM 0
 
 std::string images_to_load = "";
-
 
 void drawBones(cv::Mat &img, XNECT &xnect, int person)
 {
@@ -146,6 +146,9 @@ void readImageSeq(XNECT &xnect, int num_frames)
 
 int main(int argc, char **argv)
 {
+    /*Server server;
+    server.Initialize();
+    server.StartServer("8081", ".");*/
 	std::cout << "Starting XNECT" << argc << std::endl;
 	if (argc <= 1) {
 		std::cout << "Please give the image path (example: ./XNECT <path-to-imgs>)" << std::endl;
