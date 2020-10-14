@@ -32,5 +32,6 @@ progressbar
 h5py
 scikit-video
 matplotlib==3.1.3
+requests
 git+git://github.com/Sinnaj94/video2bvh.git
 git+git://github.com/Sinnaj94/BVHsmooth.git

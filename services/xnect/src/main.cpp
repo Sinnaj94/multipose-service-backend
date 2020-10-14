@@ -4,11 +4,14 @@
 #include <thread>
 #include <cstdlib>
 #include "xnect.hpp"
+#include "opencv2/opencv.hpp"
 #include "mongoose.h"
-#include "Server.hpp"
 #define WEB_CAM 0
 
-std::string images_to_load = "";
+std::string videoFilePath = "";
+
+using namespace cv;
+
 
 void drawBones(cv::Mat &img, XNECT &xnect, int person)
 {
@@ -114,67 +117,56 @@ bool playLIVE(XNECT &xnect)
 
 	return true;
 }
-void readImageSeq(XNECT &xnect, int num_frames)
+
+void analyseVideo(std::string &videoFilePath, XNECT &xnect)
 {
-	vector<cv::String> fn;
-	cv::glob(images_to_load + "/*.jpeg", fn, false);
+    std::cout << "[ANALYSIS] " << videoFilePath << std::endl;
 
-	vector<cv::Mat> images;
-	std::cout << num_frames << " (num_frames...)" << std::endl;
-	size_t count = fn.size();
-	if(num_frames > -1) {
-		count = num_frames;
-		std::cout << count << " (count...)" << std::endl;
-	}
+    VideoCapture cap(videoFilePath); // open the video file
+    if(!cap.isOpened())  // check if we succeeded
+        CV_Error(CV_StsError, "Can not open Video file");
 
-	for (int i = 0; i < count; i++)
-	{
-		cv::Mat currentImage = imread(fn[i]);
+    //cap.get(CV_CAP_PROP_FRAME_COUNT) contains the number of frames in the video;
+    while(1)
+    {
+        Mat frame;
+        cap >> frame; // get the next frame from video
+        if(frame.empty())
+            break;
 
-		xnect.processImg(currentImage);
+        xnect.processImg(frame);
+        xnect.sendDataToUnity();
+        drawPeople(frame, xnect);
+        namedWindow("main", WINDOW_NORMAL);
+        imshow("main", frame);
+        waitKey(1);
+    }
+    cap.release();
 
-  		//xnect.sendDataToUnity();
-		drawPeople(currentImage, xnect);
-
-		cv::namedWindow("main", cv::WINDOW_NORMAL);
-		imshow("main", currentImage);
-		cv::waitKey(1);
-		//std::cout << xnect.getUnityData() << std::endl;
-		//std::this_thread::sleep_for(std::chrono::milliseconds(100));
-	}
+    std::cout << "Finished analysis..." << std::endl;
 }
 
 int main(int argc, char **argv)
 {
-    /*Server server;
-    server.Initialize();
-    server.StartServer("8081", ".");*/
 	std::cout << "Starting XNECT" << argc << std::endl;
 	if (argc <= 1) {
-		std::cout << "Please give the image path (example: ./XNECT <path-to-imgs>)" << std::endl;
+		std::cout << "Please give the image path (example: ./XNECT <path_to_video>)" << std::endl;
 		return 1;
 	}
-	images_to_load = argv[1];
-	std::cout << "Working dir: " << images_to_load << std::endl;
+	videoFilePath = argv[1];
+	std::cout << "Working dir: " << videoFilePath << std::endl;
+
+	std::string video = videoFilePath + "/video.mp4";
+
 	int num_frames = -1;
 	if(argc == 3) {
 		std::cout << "Analysing first " << argv[2] << " frames." << std::endl;
 		num_frames = atoi(argv[2]);
 	}
 	XNECT xnect;
-
-
-	if (WEB_CAM)
-	{
-		if (playLIVE(xnect) == false)
-			return 1;
-	}
-	else
-		readImageSeq(xnect, num_frames);
-
-
-	xnect.save_joint_positions("./output");
-	xnect.save_raw_joint_positions("./output");
+    analyseVideo(video, xnect);
+	xnect.save_joint_positions(videoFilePath);
+	xnect.save_raw_joint_positions(videoFilePath);
 
 	return 0;
 }

@@ -1,10 +1,14 @@
 import math
 import os
+import time
 from pathlib import Path
+
+import requests
 from bvh_smooth.smooth_position import butterworth as pos_butterworth
 from bvh_smooth.smooth_rotation import butterworth as rot_butterworth
 import cv2
 import skvideo.io
+from flask import request
 from rq.job import get_current_job
 from video2bvh.bvh_skeleton import h36m_skeleton, cmu_skeleton, openpose_skeleton
 from video2bvh.pose_estimator_3d import estimator_3d
@@ -30,10 +34,6 @@ def analyse_2d(job_cache_dir, thumbnail_path, persist=True):
 
     thumbnail = None
     for frame in videogen.nextFrame():
-        if i == 0:
-            # create a thumbnail
-            skvideo.io.vwrite(str(thumbnail_path), frame)
-
         all_keypoints = e2d.estimate(img_list=[frame])
 
         keypoints = all_keypoints[0]
@@ -81,7 +81,6 @@ def analyse_3d(pose2d, conf, result_cache_dir):
 
 
 def export_video(pose3d_world, video_file, config, fps=60):
-    # TODO: Machen
     h36m_skel = h36m_skeleton.H36mSkeleton()
     ani = vis.vis_3d_keypoints_sequence(
         keypoints_sequence=pose3d_world,
@@ -138,8 +137,12 @@ def export_video_2d(keypoints_list, video_file, output_dir):
     cap.release()
 
 
-def convert_openpose_baseline(video):
+def prepare(video):
     from project.model import model
+    job = get_current_job()
+
+    job.meta['stage'] = {'name': 'preparing', 'progress': None}
+
     job_id = str(get_current_job().get_id())
     # add to database
     job_cache_dir = Path(os.path.join(Config.CACHE_DIR, job_id))
@@ -151,9 +154,20 @@ def convert_openpose_baseline(video):
 
     # save the SOURCE video in the cache folder
     filename = os.path.join(job_cache_dir, Config.SOURCE_VIDEO_FILE)
+    print("Saving video at %s" % filename)
     with(open(filename, 'wb')) as file:
         file.write(video)
     file.close()
+
+    # save thumbnail
+    videogen = skvideo.io.FFmpegReader(filename)
+    for frame in videogen.nextFrame():
+        thumbnail_path = job_cache_dir / Config.THUMBNAIL_FILE
+        skvideo.io.vwrite(str(thumbnail_path), frame)
+        videogen.close()
+        break
+
+
     # result
     result = model.get_result_by_id(get_current_job().get_id())
 
@@ -166,10 +180,7 @@ def convert_openpose_baseline(video):
 
     pose2d_file = result_cache_dir / Config.DATA_2D_FILE
     pose3d_file = result_cache_dir / Config.DATA_3D_FILE
-    thumbnail_path = job_cache_dir / Config.THUMBNAIL_FILE
-
     # create a thumbnail
-    job = get_current_job()
     job.meta['stage'] = {'name': 'thumbnail'}
     job.save_meta()
 
@@ -177,6 +188,14 @@ def convert_openpose_baseline(video):
     points_list = None
     job.meta['stage'] = {'name': '2d', 'progress': 0}
     job.save_meta()
+
+    return job, job_id, model, job_cache_dir, pose2d_file, pose3d_file, thumbnail_path, filename, result, \
+           result_cache_dir
+
+
+def convert_openpose_baseline(video):
+    job, job_id, model, job_cache_dir, pose2d_file, pose3d_file, thumbnail_path, filename, result, result_cache_dir = \
+        prepare(video)
 
     if not pose2d_file.exists() or not Config.CACHE_RESULTS:
         print("Beginning to 2d analyse job %s" % job_id)
@@ -252,22 +271,32 @@ def convert_openpose_baseline(video):
     return True
 
 
-def analyse_xnect(video):
-    # TODO: COnvert XNECT VIDEO Via C++ and docker container
-    raw2d, raw3d, ik3d = "/home/worker/Repos/xnect/xnect-src/bin/Release/output/raw2D.txt",\
-                         "/home/worker/Repos/xnect/xnect-src/bin/Release/output/raw3D.txt",\
-                         "/home/worker/Repos/xnect/xnect-src/bin/Release/output/IK3D.txt"
-    return raw2d, raw3d, ik3d
+def analyse_xnect(video, job_id, result_cache_dir, result, model):
+    # Make request to xnect server
+    files = {"video":("video.mp4", video, "video/mp4")}
+    r = requests.post("http://xnect:8081/%s" % str(job_id), files=files)
+    if r.status_code != 200:
+        result.result_code = model.ResultCode.failure
+        model.db.session.commit()
+        return False
+
+    urls = ["raw2d", "raw3d", "ik3d"]
+    paths = {}
+    for url in urls:
+        r = requests.get("http://xnect:8081/%s/%s" % (str(job_id), url))
+        path = os.path.join(result_cache_dir, "%s.txt" % url)
+        open(path, 'wb').write(r.content)
+        paths[url] = path
+    return paths
 
 
 def convert_xnect(video):
-    job_id = "cache"
-    if get_current_job() is not None:
-        job_id = str(get_current_job().get_id())
-    job_cache_dir = Path(os.path.join(Config.CACHE_DIR, job_id))
-    result_cache_dir = Path(os.path.join(job_cache_dir, Config.RESULT_DIR))
+    job, job_id, model, job_cache_dir, pose2d_file, pose3d_file, thumbnail_path, filename, result, result_cache_dir = \
+            prepare(video)
+    job.meta['stage'] = {'name': 'xnect', 'progress': None}
 
-    raw2d, raw3d, ik3d = analyse_xnect(video)
+    paths = analyse_xnect(video, job_id, result_cache_dir, result, model)
+    raw2d, raw3d, ik3d = paths["raw2d"], paths["raw3d"], paths["ik3d"]
     pred = xnect_to_bvh(raw2d, raw3d, ik3d)
 
     keypoints = []
@@ -285,12 +314,15 @@ def convert_xnect(video):
 
     print("Saving bvh")
     skel = muco_3dhp_skeleton.Muco3DHPSkeleton()
-    raw = job_cache_dir / Config.OUTPUT_BVH_FILE_RAW
+    raw = result_cache_dir / Config.OUTPUT_BVH_FILE_RAW
     channels, header = skel.poses2bvh(np.array(keypoints), output_file=raw)
     # smoothen
-    smoothened = job_cache_dir / Config.OUTPUT_BVH_FILE_FILTERED
+    smoothened = result_cache_dir / Config.OUTPUT_BVH_FILE
     rot_butterworth(raw, smoothened, border=1000)
     pos_butterworth(smoothened, smoothened, border=1000)
+    result.result_code = model.ResultCode.success
+    model.db.session.commit()
+    return True
 
 
 def xnect_to_bvh(raw2d_file, raw3d_file, ik3d_file):

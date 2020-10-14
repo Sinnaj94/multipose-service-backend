@@ -21,7 +21,7 @@ from flask_httpauth import HTTPBasicAuth
 
 # initialization
 from project.config import Config
-from project.conversion_task import convert_openpose_baseline
+from project.conversion_task import convert_openpose_baseline, convert_xnect
 from project.parsers import user_metadata_parser
 
 app = Flask(__name__)
@@ -293,7 +293,7 @@ class JobUploadVideo(Resource):
             abort(409, "Video has been uploaded already")
         with Connection(conn):
             q = Queue()
-            q.enqueue(convert_openpose_baseline, job_id=str(job.id), video=args['video'].read())
+            q.enqueue(convert_xnect, job_id=str(job.id), video=args['video'].read())
             job.video_uploaded = True
             model.db.session.commit()
             return job

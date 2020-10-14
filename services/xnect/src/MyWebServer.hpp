@@ -1,35 +1,39 @@
+#pragma once
 #include "mongoose.h"
 
 namespace Common
 {
-    class Server {
+    class MyWebServer {
     protected:
         struct mg_context * m_Ctx;
         bool m_ServerState;
+        bool m_isInitialized;
         std::string m_BroadcastPorts;
         std::string m_ServerRoot;
         struct mg_callbacks m_Callbacks;
+        static struct mg_connection * m_WSConnection;
     public:
+        //! Ready handler
+        static void ReadyHandler(struct mg_connection * conn)
+        {
+            std::cout << "[ INFO ]: " << "Client handshake is complete. Ready for data transmission." << std::endl;
+        };
+
+        static void ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
+
+        }
+
+
         void Initialize(void)
         {
             m_ServerState = false; // Is down initially
             m_isInitialized = false;
 
             memset(&m_Callbacks, 0, sizeof(m_Callbacks));
-            m_Callbacks.websocket_ready = Server::UploadHandler;
-            //m_Callbacks.websocket_connect = CWebSocketServer::ConnectHandler;
+            m_Callbacks.upload = MyWebServer::UploadHandler;
+            m_Callbacks.websocket_ready = MyWebServer::ReadyHandler;
 
             m_isInitialized = true;
-        }
-
-        //! Ready handler
-        static void ReadyHandler(struct mg_connection * conn)
-        {
-            m_WSConnection = conn;
-            std::string Message = "CWebSocketServer - Server is ready.";
-            mg_websocket_write(conn, WEBSOCKET_OPCODE_TEXT, Message.c_str(), std::strlen(Message.c_str()));
-
-            std::cout << "[ INFO ]: " << "Client handshake is complete. Ready for data transmission." << std::endl;
         }
 
         static void UploadHandler(struct mg_connection *, const char *file_name)
@@ -39,7 +43,7 @@ namespace Common
 
         void StartServer(const std::string Port = "", const std::string Root = "")
         {
-            this->m_BroadcastPorts = Port;
+            m_BroadcastPorts = Port;
             m_ServerRoot = Root;
             if (m_BroadcastPorts.empty() == true)
                 m_BroadcastPorts = "8080"; // Default to 8080

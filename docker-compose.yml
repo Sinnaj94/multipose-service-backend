@@ -30,6 +30,7 @@ services:
       - ./.env.dev
     volumes:
       - file-cache:/usr/data/
+      - ./services/web/project/conversion_task.py:/usr/src/app/project/conversion_task.py
     environment:
       - APP_SETTINGS=project.config.Config
       - NVIDIA_VISIBLE_DEVICES=all
@@ -61,16 +62,17 @@ services:
     runtime: nvidia
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
+      - ./services/xnect/src/xnect.py:/xnect/bin/Release/xnect.py
+      - ./services/xnect/src/main.cpp:/xnect/bin/Release/main.cpp
+      - ./videos/:/xnect/videos/
     build:
       context: ./services/xnect
       args:
         - LEVEL_DB_VERSION=1.20
-    command:
-      - /bin/bash
+    command: flask run --host=0.0.0.0 --port=8081
     stdin_open: true
     tty: true
     ports:
-      - 8080:8080
       - 8081:8081
 
 volumes:

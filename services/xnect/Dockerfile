@@ -4,7 +4,7 @@ FROM nvidia/cuda:9.1-cudnn7-devel
 WORKDIR /
 RUN apt-get update && \
 DEBIAN_FRONTEND=noninteractive apt-get install -y \
-cmake git qt5-default libboost-all-dev autoconf autogen libhdf5-dev liblmdb-dev libsnappy-dev wget libatlas-base-dev libgflags-dev libgoogle-glog-dev liblmdb-dev python-pip libprotobuf-dev protobuf-compiler python-dev libxml2-dev libxslt-dev
+cmake nano git qt5-default libboost-all-dev autoconf autogen libhdf5-dev liblmdb-dev libsnappy-dev wget libatlas-base-dev libgflags-dev libgoogle-glog-dev liblmdb-dev python-pip libprotobuf-dev protobuf-compiler python-dev libxml2-dev libxslt-dev ffmpeg pkg-config libav-tools libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libx264-dev
 
 # install leveldb
 WORKDIR /tmp
@@ -40,7 +40,7 @@ RUN git clone -b 3.4 https://github.com/opencv/opencv_contrib
 
 
 WORKDIR /opencv/build
-RUN cmake -D CMAKE_BUILD_TYPE=RELEASE -D CMAKE_INSTALL_PREFIX=/usr/lib -D WITH_TBB=ON -D BUILD_NEW_PYTHON_SUPPORT=ON -D WITH_V4L=ON -D WITH_QT=ON -D WITH_OPENGL=ON -D BUILD_TIFF=ON -D_GLIBCXX_USE_CXX11_ABI=0 -D OPENCV_EXTRA_MODULES_PATH=/opencv_contrib/modules/ ..
+RUN cmake -D CMAKE_BUILD_TYPE=RELEASE -D CMAKE_INSTALL_PREFIX=/usr/lib -D WITH_TBB=ON -D BUILD_NEW_PYTHON_SUPPORT=ON -D WITH_V4L=ON -D WITH_QT=ON -D WITH_OPENGL=ON -D BUILD_TIFF=ON -D_GLIBCXX_USE_CXX11_ABI=0 -D OPENCV_EXTRA_MODULES_PATH=/opencv_contrib/modules/ -DWITH_FFMPEG=1 ..
 RUN make -j8
 RUN make install
 
@@ -59,6 +59,9 @@ RUN make -j 8
 WORKDIR /xnect
 COPY ./xnect_library/ /xnect/
 COPY ./src/ /xnect/src/
+RUN apt install python3 python3-pip -y
+WORKDIR /xnect/src/
+RUN pip3 install -r requirements.txt
 COPY ./custom/ /xnect/custom/
 WORKDIR /xnect/build
 # clear cache
@@ -67,3 +70,11 @@ RUN cmake -DOpenCV_DIR=/usr/lib/share/OpenCV  -DCaffe_DIR=/caffe/build -DCMAKE_B
 RUN make clean
 RUN make -j8
 WORKDIR /xnect/bin/Release
+COPY ./src/xnect.py /xnect/bin/Release/xnect.py
+ENV LANG C.UTF-8
+ENV LANG C.UTF-8
+# TODO: REMOVE THAT
+ENV FLASK_ENV development
+ENV FLASK_DEBUG 1
+ENV FLASK_APP xnect.py
+
