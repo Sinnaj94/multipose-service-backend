@@ -62,7 +62,6 @@ COPY ./src/ /xnect/src/
 RUN apt install python3 python3-pip -y
 WORKDIR /xnect/src/
 RUN pip3 install -r requirements.txt
-COPY ./custom/ /xnect/custom/
 WORKDIR /xnect/build
 # clear cache
 ENV CPLUS_INCLUDE_PATH="$CPLUS_INCLUDE_PATH:/usr/include/python2.7/"

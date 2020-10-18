@@ -26,7 +26,9 @@ class Config(object):
     OUTPUT_VIDEO_FILE = "output_video.mp4"
     OUTPUT_BVH_FILE = "output_bvh.bvh"
     OUTPUT_BVH_FILE_RAW = "output_raw.bvh"
-    OUTPUT_BVH_FILE_FILTERED = "output_filtered.bvh"
+    OUTPUT_BVH_FILE_FILTERED = "output_filtered_%i.bvh"
+    OUTPUT_BVH_FILE_FILTERED_DYNAMIC = "output_filtered.bvh"
+    OUTPUT_FILTER_FACTORS = [10, 100, 1000]
     DATA_2D_FILE = "data_2d.npy"
     CONFIG_2D_FILE = "config_2d.npy"
     DATA_3D_FILE = "data_3d.npy"

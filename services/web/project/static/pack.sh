@@ -1,0 +1,1 @@
+npx webpack src.js -o bundle.js

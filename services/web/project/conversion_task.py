@@ -167,10 +167,11 @@ def prepare(video):
         videogen.close()
         break
 
+    fps = videogen.inputfps
 
     # result
     result = model.get_result_by_id(get_current_job().get_id())
-
+    result.result_code = model.ResultCode.pending
     model.db.session.commit()
 
     result_cache_dir = Path(os.path.join(job_cache_dir, Config.RESULT_DIR))
@@ -190,12 +191,12 @@ def prepare(video):
     job.save_meta()
 
     return job, job_id, model, job_cache_dir, pose2d_file, pose3d_file, thumbnail_path, filename, result, \
-           result_cache_dir
+           result_cache_dir, fps
 
 
 def convert_openpose_baseline(video):
-    job, job_id, model, job_cache_dir, pose2d_file, pose3d_file, thumbnail_path, filename, result, result_cache_dir = \
-        prepare(video)
+    job, job_id, model, job_cache_dir, pose2d_file, pose3d_file, thumbnail_path, filename, result, result_cache_dir, \
+    fps = prepare(video)
 
     if not pose2d_file.exists() or not Config.CACHE_RESULTS:
         print("Beginning to 2d analyse job %s" % job_id)
@@ -273,7 +274,7 @@ def convert_openpose_baseline(video):
 
 def analyse_xnect(video, job_id, result_cache_dir, result, model):
     # Make request to xnect server
-    files = {"video":("video.mp4", video, "video/mp4")}
+    files = {"video": ("video.mp4", video, "video/mp4")}
     r = requests.post("http://xnect:8081/%s" % str(job_id), files=files)
     if r.status_code != 200:
         result.result_code = model.ResultCode.failure
@@ -291,8 +292,8 @@ def analyse_xnect(video, job_id, result_cache_dir, result, model):
 
 
 def convert_xnect(video):
-    job, job_id, model, job_cache_dir, pose2d_file, pose3d_file, thumbnail_path, filename, result, result_cache_dir = \
-            prepare(video)
+    job, job_id, model, job_cache_dir, pose2d_file, pose3d_file, thumbnail_path, filename, result, result_cache_dir,\
+    fps = prepare(video)
     job.meta['stage'] = {'name': 'xnect', 'progress': None}
 
     paths = analyse_xnect(video, job_id, result_cache_dir, result, model)
@@ -315,11 +316,15 @@ def convert_xnect(video):
     print("Saving bvh")
     skel = muco_3dhp_skeleton.Muco3DHPSkeleton()
     raw = result_cache_dir / Config.OUTPUT_BVH_FILE_RAW
-    channels, header = skel.poses2bvh(np.array(keypoints), output_file=raw)
+    # raw file
+    channels, header = skel.poses2bvh(np.array(keypoints), output_file=raw, frame_rate=fps)
     # smoothen
-    smoothened = result_cache_dir / Config.OUTPUT_BVH_FILE
-    rot_butterworth(raw, smoothened, border=1000)
-    pos_butterworth(smoothened, smoothened, border=1000)
+    # TODO: Dynamic or static?
+    for i in range(len(Config.OUTPUT_FILTER_FACTORS)):
+        border = Config.OUTPUT_FILTER_FACTORS[i]
+        filename = result_cache_dir / (Config.OUTPUT_BVH_FILE_FILTERED % (i + 1))
+        rot_butterworth(raw, filename, border=border, u0=10)
+        pos_butterworth(filename, filename, border=border, u0=10)
     result.result_code = model.ResultCode.success
     model.db.session.commit()
     return True

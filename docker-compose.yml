@@ -52,6 +52,8 @@ services:
       - POSTGRES_USER=user
       - POSTGRES_PASSWORD=CHANGE_THIS_TO_A_STRONG_PASSWORD
       - POSTGRES_DB=mocap
+    ports:
+      - 5432:5432
 
   xnect:
     container_name: xnect

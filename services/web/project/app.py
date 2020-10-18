@@ -11,10 +11,13 @@ from rq.job import Job as RedisJob
 from rq.exceptions import NoSuchJobError
 from flask import Flask, Blueprint, g, jsonify, send_from_directory, url_for, make_response, render_template, redirect, \
     send_file
-from flask_restplus import Api, Resource, abort, fields
+from flask_restplus import Api, Resource, abort, fields, ValidationError
 from werkzeug.exceptions import HTTPException, NotFound
 from project import parsers
 from rq import Queue, Connection
+
+from bvh_smooth.smooth_position import butterworth as pos_butterworth
+from bvh_smooth.smooth_rotation import butterworth as rot_butterworth
 
 # authentication
 from flask_httpauth import HTTPBasicAuth
@@ -39,8 +42,8 @@ api = Api(blueprint, description="Motion Capturing from single RGB-Video", versi
 app.register_blueprint(blueprint)
 
 from rq import cancel_job
-# TODO: Success = 1; Pending = 0; Failure = -1
 class ResultCode(enum.IntEnum):
+    default = 2
     success = 1
     failure = -1
     pending = 0
@@ -65,14 +68,13 @@ results_marshal = api.model('Result', {
     'date': fields.DateTime(dt_format='iso8601'),
     'output_video_url': fields.Url('api.results_result_output_video'),
     'output_bvh': fields.Url('api.results_result_bvh_file')
-
 })
 jobs_marshal = api.model('Job', {
     # TODO: Show user name
     'id': fields.String,
     'name': fields.String,
     'video_uploaded': fields.Boolean,
-    'date_updated': fields.DateTime(dt_format='rfc822'),
+    'date_updated': fields.DateTime(dt_format='iso8601'),
     'upload_job_url': fields.Url('api.jobs_job_upload_video'),
     'input_video_url': fields.Url('api.jobs_job_source_video'),
     'thumbnail_url': fields.Url('api.jobs_job_thumbnail'),
@@ -125,10 +127,22 @@ USER MANAGEMENT
 
 user_space = api.namespace('users', description='Users management')
 
-user_parser = api.parser()
-user_parser.add_argument('username', type=str, required=True, location='form')
-user_parser.add_argument('password', type=str, required=True, location='form')
 
+def min_length(min_length):
+    def validate(s):
+        if len(s) >= min_length:
+            return s
+        raise ValidationError("Not long enough")
+    return validate
+
+
+user_parser = api.parser()
+user_parser.add_argument('username', type=min_length(5), required=True, location='form')
+user_parser.add_argument('password', type=min_length(5), required=True, location='form')
+
+filter_parser = api.parser()
+filter_parser.add_argument('border', type=int, required=True, location='args')
+filter_parser.add_argument('u0', type=int, required=True, location='args')
 
 # source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
 @user_space.route("/", endpoint='with-parser')
@@ -198,19 +212,17 @@ def verify_password(username_or_token, password):
 
 # source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
 @auth_space.route("/token")
-class GetToken(Resource):
+class Token(Resource):
     @auth.login_required
     @api.response(401, 'The user is not permitted to do this action')
-    @api.response(200, 'Return token which is valid for 600 seconds')
+    @api.response(200, 'Return token which is valid for 5184000 seconds')
     def get(self):
         # duration in seconds
         duration = 5184000
-        # todo: make it longer durable mein lieber
         token = g.user.generate_auth_token(duration)
         print(g.user)
         return jsonify({'exp': time.time() + duration, 'token': token.decode('ascii'), 'duration': duration,
                         'user': g.user.serialize()})
-
 
 """
 Jobs Space
@@ -314,18 +326,17 @@ class Job(Resource):
             abort(404, "The resource was not found.")
         return job
 
+    @auth.login_required
+    @api.response(404, 'A job with the given id was not found')
+    @api.response(401, 'The user is not permitted to do this action')
+    @api.response(200, 'Return the new job')
     def delete(self, id):
-        try:
-            job = RedisJob.fetch(str(id), connection=conn)
-            if job.is_failed:
-                cancel_job(job.get_id)
-                job = model.retrieve_job(id)
-                return model.delete_job(job)
-            if not job.is_finished:
-                return {"message": "The job is currently working."}, 409
-        except NoSuchJobError:
-            job = model.retrieve_job(id)
-            return model.delete_job(job)
+        job = model.retrieve_job(id)
+        if job.user_id != g.user.id:
+            return 401
+        if model.get_result_by_id(job.id).result_code == ResultCode.pending:
+            return 400
+        return model.delete_job(job.id)
 
 
 
@@ -451,7 +462,53 @@ class ResultBvhFile(Resource):
         if result.result_code is not model.ResultCode.success:
             return 202
         path = os.path.join(Config.CACHE_DIR, str(result.id), Config.RESULT_DIR)
-        return send_from_directory(path, Config.OUTPUT_BVH_FILE, as_attachment=True,
+        return send_from_directory(path, Config.OUTPUT_BVH_FILE_RAW, as_attachment=True,
+                                   attachment_filename=str(result.id) + ".bvh",
+                                   mimetype="application/octet-stream")
+
+
+def filter_bvh(id, border, u0):
+    path = os.path.join(Config.CACHE_DIR, str(id), Config.RESULT_DIR)
+    raw = os.path.join(path, Config.OUTPUT_BVH_FILE_RAW)
+    output = os.path.join(path, Config.OUTPUT_BVH_FILE_FILTERED_DYNAMIC)
+    rot_butterworth(raw, output, border, u0)
+    rot_butterworth(output, output, border, u0)
+    rot_butterworth(raw, output, border, u0)
+    rot_butterworth(output, output, border, u0)
+
+
+@results_space.route("<uuid:id>/bvh/filtered")
+class ResultBvhFileFilteredDynamic(Resource):
+    @api.produces(["application/octet-stream"])
+    @api.response(200, 'Return bvh file')
+    @api.expect(filter_parser)
+    def get(self, id):
+        args = filter_parser.parse_args(strict=True)
+        result = model.get_result_by_id(id)
+        if result is None:
+            return 404
+        if result.result_code is not model.ResultCode.success:
+            return 202
+        filter_bvh(result.id, args['border'], args['u0'])
+        path = os.path.join(Config.CACHE_DIR, str(result.id), Config.RESULT_DIR)
+        return send_from_directory(path, Config.OUTPUT_BVH_FILE_FILTERED_DYNAMIC, as_attachment=True,
+                                          attachment_filename=str(result.id) + ".bvh",
+                                          mimetype="application/octet-stream")
+
+
+@results_space.route("/<uuid:id>/bvh/<int:factor>")
+class ResultBvhFileFiltered(Resource):
+    @api.produces(["application/octet-stream"])
+    @api.response(200, 'Return bvh file')
+    def get(self, id, factor):
+        result = model.get_result_by_id(id)
+        if result is None:
+            return 404
+        if result.result_code is not model.ResultCode.success:
+            return 202
+        path = os.path.join(Config.CACHE_DIR, str(result.id), Config.RESULT_DIR)
+        print(Config.OUTPUT_BVH_FILE_FILTERED % factor)
+        return send_from_directory(path, Config.OUTPUT_BVH_FILE_FILTERED % factor, as_attachment=True,
                                    attachment_filename=str(result.id) + ".bvh",
                                    mimetype="application/octet-stream")
 
@@ -461,6 +518,32 @@ class ResultRenderHTML(Resource):
     def get(self, id):
         headers = {'Content-Type' : 'text/html'}
         return make_response(render_template('bvh_import/index.html', current_url=url_for('api.results_result_bvh_file', id=id)), 200, headers)
+
+
+@results_space.route("/<uuid:id>/render_html/<int:factor>")
+class ResultRenderHTMLFiltered(Resource):
+    def get(self, id, factor):
+        headers = {'Content-Type' : 'text/html'}
+        if factor == 0:
+            return make_response(render_template('bvh_import/index.html',
+                                                 current_url=url_for('api.results_result_bvh_file', id=id)), 200,
+                                 headers)
+        return make_response(render_template('bvh_import/index.html',
+                                             current_url=url_for('api.results_result_bvh_file_filtered', id=id,factor=factor),
+                                             original_url=url_for('api.results_result_bvh_file', id=id)
+                                             ), 200, headers)
+
+
+@results_space.route("/<uuid:id>/render_html_filtered")
+class ResultRenderHTMLFilteredDynamic(Resource):
+    @api.expect(filter_parser)
+    def get(self, id):
+        args = filter_parser.parse_args(strict=True)
+        headers = {'Content-Type' : 'text/html'}
+        return make_response(render_template('bvh_import/index.html',
+                                             current_url=url_for('api.results_result_bvh_file_filtered_dynamic', border=args['border'], u0 =args['u0'], id=id),
+                                             original_url=url_for('api.results_result_bvh_file', id=id)),
+                                                200, headers)
 
 
 @results_space.route("/<uuid:id>/2d_data")

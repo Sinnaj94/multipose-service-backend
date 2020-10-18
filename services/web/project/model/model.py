@@ -50,7 +50,6 @@ class Users(db.Model):
                               algorithms=['HS256'])
         except:
             return
-        print(str(data['id']))
         return Users.query.get(data['id'])
 
     def serialize(self):
@@ -95,7 +94,7 @@ class Results(db.Model):
     __tablename_ = 'results'
     id = db.Column(UUID(as_uuid=True), ForeignKey('jobs.id'), primary_key=True)
     user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
-    result_code = db.Column(db.Enum(ResultCode), nullable=False, default=ResultCode.pending)
+    result_code = db.Column(db.Enum(ResultCode), nullable=False, default=ResultCode.default)
     date = db.Column(db.TIMESTAMP, default=datetime.now(), nullable=False)
 
 
@@ -266,7 +265,7 @@ def get_job_by_result_id(id):
     return db.session.query(Jobs).join(Results, Jobs.result).filter(Results.id == id).first()
 
 
-def delete_job(job):
-    get_result_by_id(job.id).query.delete()
-    job.query.delete()
+def delete_job(id):
+    db.session.query(Results).filter_by(id=id).delete()
+    db.session.query(Jobs).filter_by(id=id).delete()
     return True

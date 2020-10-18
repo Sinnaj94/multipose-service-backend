@@ -21,6 +21,7 @@ def run_worker():
 
 @cli.command("create_db")
 def create_db():
+    print("Creating my database...")
     model.db.create_all()
 
 
