@@ -71,7 +71,7 @@ function init() {
 
 
 	scene = new THREE.Scene();
-	scene.background = new THREE.Color( 0xfefefe );
+	scene.background = new THREE.Color( 0x222222 );
 
 	scene.add( new THREE.GridHelper( 400, 10 ) );
 

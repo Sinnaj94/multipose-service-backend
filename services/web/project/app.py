@@ -69,10 +69,13 @@ results_marshal = api.model('Result', {
     'output_video_url': fields.Url('api.results_result_output_video'),
     'output_bvh': fields.Url('api.results_result_bvh_file')
 })
+
 jobs_marshal = api.model('Job', {
     # TODO: Show user name
     'id': fields.String,
     'name': fields.String,
+    'description': fields.String,
+    'public': fields.Boolean,
     'video_uploaded': fields.Boolean,
     'date_updated': fields.DateTime(dt_format='iso8601'),
     'upload_job_url': fields.Url('api.jobs_job_upload_video'),
@@ -581,8 +584,19 @@ posts_space = api.namespace('posts', description='Posts feed')
 @posts_space.route("/")
 class Posts(Resource):
     @api.response(200, 'Return the first 100 public posts')
+    @posts_space.marshal_list_with(jobs_marshal)
     def get(self):
         return model.get_all_public_posts()
+
+
+@posts_space.route("/<uuid:id>")
+class SinglePost(Resource):
+    @auth.login_required
+    @jobs_space.marshal_with(jobs_marshal)
+    def post(self, id):
+        return model.set_job_public(id)
+
+
 
 
 model.db.init_app(app)

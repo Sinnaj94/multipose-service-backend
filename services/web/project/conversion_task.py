@@ -274,21 +274,26 @@ def convert_openpose_baseline(video):
 
 def analyse_xnect(video, job_id, result_cache_dir, result, model):
     # Make request to xnect server
-    files = {"video": ("video.mp4", video, "video/mp4")}
-    r = requests.post("http://xnect:8081/%s" % str(job_id), files=files)
-    if r.status_code != 200:
+    try:
+        files = {"video": ("video.mp4", video, "video/mp4")}
+        r = requests.post("http://xnect:8081/%s" % str(job_id), files=files)
+        if r.status_code != 200:
+            result.result_code = model.ResultCode.failure
+            model.db.session.commit()
+            return False
+
+        urls = ["raw2d", "raw3d", "ik3d"]
+        paths = {}
+        for url in urls:
+            r = requests.get("http://xnect:8081/%s/%s" % (str(job_id), url))
+            path = os.path.join(result_cache_dir, "%s.txt" % url)
+            open(path, 'wb').write(r.content)
+            paths[url] = path
+        return paths
+    except:
         result.result_code = model.ResultCode.failure
         model.db.session.commit()
         return False
-
-    urls = ["raw2d", "raw3d", "ik3d"]
-    paths = {}
-    for url in urls:
-        r = requests.get("http://xnect:8081/%s/%s" % (str(job_id), url))
-        path = os.path.join(result_cache_dir, "%s.txt" % url)
-        open(path, 'wb').write(r.content)
-        paths[url] = path
-    return paths
 
 
 def convert_xnect(video):

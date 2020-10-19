@@ -86,6 +86,7 @@ class Jobs(db.Model):
     name = db.Column(db.String, nullable=False)
     user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
     video_uploaded = db.Column(db.Boolean, default=False)
+    public = db.Column(db.Boolean, default=False, nullable=False)
     # Date updated
     date_updated = db.Column(db.TIMESTAMP, default=datetime.now())
 
@@ -165,7 +166,7 @@ def get_result_by_job_id(job_id):
 
 def get_jobs_by_user_id(user_id, **kwargs):
 
-    jobs = db.session.query(Jobs).filter_by(user_id=user_id)
+    jobs = db.session.query(Jobs).filter_by(user_id=user_id).order_by(desc(Jobs.date_updated))
     if kwargs['result_code'] is not None:
         jobs = jobs.join(Results, Jobs.result).filter(
             Results.result_code == ResultCode(kwargs['result_code']))
@@ -226,7 +227,7 @@ def filter_results(user_id):
 
 
 def get_all_public_posts():
-    return db.session.query(Posts).filter_by(public=True).order_by(desc(Posts.date)).limit(100)
+    return db.session.query(Jobs).filter_by(public=True).order_by(desc(Jobs.date_updated)).limit(100).all()
 
 
 def get_pending_results():
@@ -269,3 +270,16 @@ def delete_job(id):
     db.session.query(Results).filter_by(id=id).delete()
     db.session.query(Jobs).filter_by(id=id).delete()
     return True
+
+
+class JobNotFinished(werkzeug.exceptions.HTTPException):
+    code = 409
+    description = "Job is not finished and cannot be posted."
+
+def set_job_public(id):
+    job = retrieve_job(id)
+    if get_result_by_id(id).result_code != ResultCode.success:
+        raise JobNotFinished
+    job.public = True
+    db.session.commit()
+    return job
