@@ -30,6 +30,7 @@ class Users(db.Model):
     registration_date = db.Column(db.TIMESTAMP, nullable=False, default=datetime.now())
     user_metadata = relationship("UserMetadata", backref="users")
     posts = relationship("Posts", backref="users", lazy='dynamic', cascade="all, delete-orphan")
+    job = relationship("Jobs", backref="users", lazy='dynamic', cascade="all, delete-orphan")
     result = relationship("Results", backref="users", lazy='dynamic', cascade="all, delete-orphan")
 
     def hash_password(self, password):
@@ -68,6 +69,20 @@ class UserMetadata(db.Model):
     email = db.Column(db.String, nullable=True)
 
 
+JobTag = db.Table(
+    'JobTag', db.Model.metadata,
+    db.Column('tagID', UUID(as_uuid=True), ForeignKey('tags.id', ondelete="CASCADE")),
+    db.Column('jobID', UUID(as_uuid=True), ForeignKey('jobs.id', ondelete="CASCADE"))
+)
+
+
+class Tags(db.Model):
+    __tablename__ = 'tags'
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
+    text = db.Column(db.String, nullable=False)
+    jobs = relationship('Jobs', secondary=JobTag, back_populates='tags')
+
+
 class Posts(db.Model):
     __tablename__ = 'posts'
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
@@ -84,7 +99,9 @@ class Jobs(db.Model):
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
     result = relationship("Results", backref="jobs", uselist=False)
     name = db.Column(db.String, nullable=False)
+    tags = relationship('Tags', secondary=JobTag, back_populates='jobs')
     user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    user = relationship("Users", backref="jobs")
     video_uploaded = db.Column(db.Boolean, default=False)
     public = db.Column(db.Boolean, default=False, nullable=False)
     # Date updated
@@ -145,7 +162,14 @@ def retrieve_job(job_id):
 def add_job(**kwargs):
     job = Jobs(user_id=kwargs['user_id'], name=kwargs['name'])
     db.session.add(job)
+    for tag in kwargs['tags']:
+        t = db.session.query(Tags).filter_by(text=tag).first()
+        if t is None:
+            t = Tags(text=tag)
+        t.jobs.append(job)
+
     db.session.commit()
+
     return job
 
 
@@ -283,3 +307,9 @@ def set_job_public(id):
     job.public = True
     db.session.commit()
     return job
+
+
+def get_public_posts_filtered_by_tags(tags):
+    print(Jobs.tags)
+    t = db.session.query(Jobs).filter(Jobs.tags.any(Tags.text.in_(tags)))
+    return t.order_by(desc(Jobs.date_updated)).all()

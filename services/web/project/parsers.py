@@ -6,6 +6,7 @@ import werkzeug
 
 post_job_parser = reqparse.RequestParser()
 post_job_parser.add_argument('name', default="My Job", type=str, location='form')
+post_job_parser.add_argument('tags', type=str, location='form', action='append', default=[])
 
 get_jobs_parser = reqparse.RequestParser()
 get_jobs_parser.add_argument('result_code', required=False, type=int, choices=[-1, 0, 1])
@@ -34,3 +35,6 @@ user_metadata_parser.add_argument('prename', type=str, required=False)
 user_metadata_parser.add_argument('surname', type=str, required=False)
 user_metadata_parser.add_argument('email', type=str, required=False)
 user_metadata_parser.add_argument('website', type=str, required=False)
+
+posts_parser = reqparse.RequestParser()
+posts_parser.add_argument('tags[]', type=str, action='append')

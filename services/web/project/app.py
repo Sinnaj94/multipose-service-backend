@@ -61,20 +61,42 @@ status_marshal = api.model('Status', {
     'problem': fields.Boolean
 })
 
-
+user_metadata_marshal = api.model('UserMetadata', {
+    'prename': fields.String,
+    'surname': fields.String,
+    'website': fields.String,
+    'email': fields.String
+})
+light_user_marshal = api.model('User', {
+    'id': fields.String,
+    'username': fields.String,
+    'registration_date': fields.DateTime(dt_format='iso8601'),
+})
+user_marshal = api.model('User', {
+    'id': fields.String,
+    'username': fields.String,
+    'registration_date': fields.DateTime(dt_format='iso8601'),
+    'user_metadata': fields.Nested(user_metadata_marshal)
+})
 results_marshal = api.model('Result', {
     'id': fields.String,
     'result_code': fields.Integer(description="Result Code - Success: 1; Failure: 0; Pending: -1"),
     'date': fields.DateTime(dt_format='iso8601'),
     'output_video_url': fields.Url('api.results_result_output_video'),
-    'output_bvh': fields.Url('api.results_result_bvh_file')
+    'output_bvh': fields.Url('api.results_result_bvh_file'),
+    'user': fields.Nested(user_marshal)
+})
+
+tag_marshal = api.model('Tag', {
+    'text': fields.String
 })
 
 jobs_marshal = api.model('Job', {
     # TODO: Show user name
     'id': fields.String,
+    'user': fields.Nested(light_user_marshal),
     'name': fields.String,
-    'description': fields.String,
+    'tags': fields.Nested(tag_marshal),
     'public': fields.Boolean,
     'video_uploaded': fields.Boolean,
     'date_updated': fields.DateTime(dt_format='iso8601'),
@@ -82,18 +104,6 @@ jobs_marshal = api.model('Job', {
     'input_video_url': fields.Url('api.jobs_job_source_video'),
     'thumbnail_url': fields.Url('api.jobs_job_thumbnail'),
     'result': fields.Nested(results_marshal),
-})
-user_metadata_marshal = api.model('UserMetadata', {
-    'prename': fields.String,
-    'surname': fields.String,
-    'website': fields.String,
-    'email': fields.String
-})
-user_marshal = api.model('User', {
-    'id': fields.String,
-    'username': fields.String,
-    'registration_date': fields.DateTime(dt_format='rfc822'),
-    'user_metadata': fields.Nested(user_metadata_marshal)
 })
 
 # queue building
@@ -283,8 +293,8 @@ class Jobs(Resource):
     @api.response(200, 'Return the new job')
     def post(self):
         args = parsers.post_job_parser.parse_args()
-        job = model.add_job(**{"user_id": g.user.id,"name": args['name']})
-        print(str(job.id))
+        print(args)
+        job = model.add_job(**{"user_id": g.user.id, "name": args['name'], "tags": args['tags']})
         return job
 
 
@@ -584,9 +594,14 @@ posts_space = api.namespace('posts', description='Posts feed')
 @posts_space.route("/")
 class Posts(Resource):
     @api.response(200, 'Return the first 100 public posts')
+    @api.expect(parsers.posts_parser)
     @posts_space.marshal_list_with(jobs_marshal)
     def get(self):
-        return model.get_all_public_posts()
+        args = parsers.posts_parser.parse_args(strict=True)
+        print(args)
+        if args['tags[]'] is None:
+            return model.get_all_public_posts()
+        return model.get_public_posts_filtered_by_tags(args['tags[]'])
 
 
 @posts_space.route("/<uuid:id>")
@@ -595,8 +610,6 @@ class SinglePost(Resource):
     @jobs_space.marshal_with(jobs_marshal)
     def post(self, id):
         return model.set_job_public(id)
-
-
 
 
 model.db.init_app(app)
