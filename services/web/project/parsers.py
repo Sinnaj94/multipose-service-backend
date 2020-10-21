@@ -38,3 +38,7 @@ user_metadata_parser.add_argument('website', type=str, required=False)
 
 posts_parser = reqparse.RequestParser()
 posts_parser.add_argument('tags[]', type=str, action='append')
+
+
+render_parser = reqparse.RequestParser()
+render_parser.add_argument('autorotate', type=bool, default=False)

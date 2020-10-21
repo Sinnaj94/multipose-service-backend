@@ -12,30 +12,9 @@ var mixer, skeletonHelper;
 var mixer1, skeletonHelper1;
 const dataURL = document.getElementById("current-url").content
 const originalURL = document.getElementById("original-url").content
-
-
+const rotate = document.getElementById("auto-rotate").content === "True"
 init();
 animate();
-
-
-/*var loader1 = new BVHLoader();
-loader1.load(originalURL, function ( result ) {
-
-	skeletonHelper1 = new THREE.SkeletonHelper( result.skeleton.bones[ 0 ] );
-	skeletonHelper1.skeleton = result.skeleton; // allow animation mixer to bind to THREE.SkeletonHelper directly
-	skeletonHelper1.material.linewidth = 10
-
-	var boneContainer = new THREE.Group();
-	boneContainer.add( result.skeleton.bones[ 0 ] );
-
-	scene.add( skeletonHelper1 );
-	scene.add( boneContainer );
-
-	// play animation
-	mixer1 = new THREE.AnimationMixer( skeletonHelper1 );
-	mixer1.clipAction( result.clip ).setEffectiveWeight( 1.0 ).play();
-	if(mixer != null) mixer1.setTime(mixer.time)
-} );*/
 
 var loader = new BVHLoader();
 loader.load(dataURL, function ( result ) {
@@ -90,7 +69,11 @@ function init() {
 
 	controls.minDistance = 10;
 	controls.maxDistance = 100;
-
+	if(rotate) {
+		camera.position.set( 0, 20, -30 );
+		controls.autoRotate = true
+		controls.autoRotateSpeed = 5
+	}
 	controls.addEventListener('change', savePosition)
 
 	window.addEventListener( 'resize', onWindowResize, false );

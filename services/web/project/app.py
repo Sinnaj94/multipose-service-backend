@@ -528,9 +528,11 @@ class ResultBvhFileFiltered(Resource):
 
 @results_space.route("/<uuid:id>/render_html")
 class ResultRenderHTML(Resource):
+    @api.expect(parsers.render_parser)
     def get(self, id):
+        args = parsers.render_parser.parse_args(strict=True)
         headers = {'Content-Type' : 'text/html'}
-        return make_response(render_template('bvh_import/index.html', current_url=url_for('api.results_result_bvh_file', id=id)), 200, headers)
+        return make_response(render_template('bvh_import/index.html', auto_rotate=args['autorotate'], current_url=url_for('api.results_result_bvh_file', id=id)), 200, headers)
 
 
 @results_space.route("/<uuid:id>/render_html/<int:factor>")
@@ -610,6 +612,11 @@ class SinglePost(Resource):
     @jobs_space.marshal_with(jobs_marshal)
     def post(self, id):
         return model.set_job_public(id)
+
+    @auth.login_required
+    @jobs_space.marshal_with(jobs_marshal)
+    def delete(self, id):
+        return model.set_job_private(id)
 
 
 model.db.init_app(app)

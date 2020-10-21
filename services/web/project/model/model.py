@@ -311,5 +311,14 @@ def set_job_public(id):
 
 def get_public_posts_filtered_by_tags(tags):
     print(Jobs.tags)
-    t = db.session.query(Jobs).filter(Jobs.tags.any(Tags.text.in_(tags)))
+    t = db.session.query(Jobs).filter_by(public=True).filter(Jobs.tags.any(Tags.text.in_(tags)))
     return t.order_by(desc(Jobs.date_updated)).all()
+
+
+def set_job_private(id):
+    job = retrieve_job(id)
+    if get_result_by_id(id).result_code != ResultCode.success:
+        raise JobNotFinished
+    job.public = False
+    db.session.commit()
+    return job
