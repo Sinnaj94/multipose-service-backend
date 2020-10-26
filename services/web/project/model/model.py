@@ -76,6 +76,16 @@ JobTag = db.Table(
 )
 
 
+class Bookmarks(db.Model):
+    __tablename__ = 'bookmarks'
+    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
+    category = db.Column(db.String, default="Bookmarks")
+    user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete="CASCADE"))
+    user = relationship("Users", backref="bookmarks")
+    job_id = db.Column(UUID(as_uuid=True), ForeignKey('jobs.id', ondelete="CASCADE"))
+    job = relationship("Jobs", backref="bookmarks")
+
+
 class Tags(db.Model):
     __tablename__ = 'tags'
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
@@ -292,8 +302,8 @@ def get_job_by_result_id(id):
 
 def delete_job(id):
     db.session.query(Results).filter_by(id=id).delete()
-    db.session.query(Jobs).filter_by(id=id).delete()
-    return True
+    result = db.session.query(Jobs).filter_by(id=id).delete()
+    return result > 0
 
 
 class JobNotFinished(werkzeug.exceptions.HTTPException):
@@ -310,7 +320,6 @@ def set_job_public(id):
 
 
 def get_public_posts_filtered_by_tags(tags):
-    print(Jobs.tags)
     t = db.session.query(Jobs).filter_by(public=True).filter(Jobs.tags.any(Tags.text.in_(tags)))
     return t.order_by(desc(Jobs.date_updated)).all()
 
@@ -322,3 +331,44 @@ def set_job_private(id):
     job.public = False
     db.session.commit()
     return job
+
+
+class BookmarkExists(werkzeug.exceptions.HTTPException):
+    code = 409
+    description = "Bookmark with given conditions already exists."
+
+
+def save_bookmark(job_id, user_id, category):
+    if category is None:
+        category = "Bookmarks"
+    if db.session.query(Bookmarks).filter_by(job_id=job_id, user_id=user_id).scalar() is not None:
+        raise BookmarkExists
+    bookmark = Bookmarks(job_id=job_id, user_id=user_id, category=category)
+    db.session.add(bookmark)
+    db.session.commit()
+    f = db.session.query(Jobs).filter_by(id=job_id).first()
+    count = None
+    if f is not None:
+        count = len(f.bookmarks)
+    return {"count": count, "success": True}
+
+
+def remove_bookmark(job_id, user_id, category):
+    if category is None:
+        category = "Bookmarks"
+    query = db.session.query(Bookmarks).filter_by(job_id=job_id, user_id=user_id)
+    count = None
+    result = query.delete()
+
+    f = db.session.query(Jobs).filter_by(id=job_id).first()
+    if f is not None:
+        count = len(f.bookmarks)
+    return {"count": count, "success": result > 0}
+
+
+def get_bookmarks_by_user(id, tags):
+    jobs = []
+    bookmarks = db.session.query(Bookmarks).filter_by(user_id=id)
+    for bookmark in bookmarks.all():
+        jobs.append(bookmark.job)
+    return jobs

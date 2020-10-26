@@ -7,6 +7,7 @@ import time
 import zipfile
 
 import redis
+from flask_restplus.fields import Raw
 from rq.job import Job as RedisJob
 from rq.exceptions import NoSuchJobError
 from flask import Flask, Blueprint, g, jsonify, send_from_directory, url_for, make_response, render_template, redirect, \
@@ -49,7 +50,19 @@ class ResultCode(enum.IntEnum):
     pending = 0
 
 
-# import marshallers
+class Count(Raw):
+    def format(self, value):
+        return len(value)
+
+
+class BookmarkedByCurrentUser(Raw):
+    def format(self, value):
+        for v in value:
+            if g.user.id == v.user_id:
+                return True
+        return False
+
+
 stage_marshal = api.model('Stage', {
     'progress' : fields.Float(),
     'name': fields.String()
@@ -91,12 +104,27 @@ tag_marshal = api.model('Tag', {
     'text': fields.String
 })
 
+bookmark_marshal = api.model('Bookmarks', {
+    'category': fields.String,
+    'user_id': fields.String,
+    'job_id': fields.String,
+    'count': Count(attribute="job.bookmarks")
+})
+
+delete_bookmark_marshal = api.model('Bookmarks', {
+    'count': fields.Integer,
+    'success': fields.Boolean
+})
+
+
 jobs_marshal = api.model('Job', {
     # TODO: Show user name
     'id': fields.String,
     'user': fields.Nested(light_user_marshal),
     'name': fields.String,
     'tags': fields.Nested(tag_marshal),
+    'num_bookmarks': Count(attribute='bookmarks'),
+    'bookmarked': BookmarkedByCurrentUser(attribute='bookmarks'),
     'public': fields.Boolean,
     'video_uploaded': fields.Boolean,
     'date_updated': fields.DateTime(dt_format='iso8601'),
@@ -296,6 +324,29 @@ class Jobs(Resource):
         print(args)
         job = model.add_job(**{"user_id": g.user.id, "name": args['name'], "tags": args['tags']})
         return job
+
+
+@jobs_space.route("/bookmarks")
+class Bookmarks(Resource):
+    @auth.login_required
+    @jobs_space.marshal_list_with(jobs_marshal)
+    @api.expect(parsers.posts_parser)
+    @api.response(401, 'The user is not permitted to do this action')
+    @api.response(200, 'Return all jobs belonging to the authorized user')
+    def get(self):
+        args = parsers.posts_parser.parse_args()
+        return model.get_bookmarks_by_user(g.user.id, args['tags[]'])
+
+@jobs_space.route("/bookmarks/<uuid:id>")
+class Bookmark(Resource):
+    @auth.login_required
+    def post(self, id):
+        return model.save_bookmark(id, g.user.id, None)
+
+    @auth.login_required
+    def delete(self, id):
+        return model.remove_bookmark(id, g.user.id, None)
+
 
 
 @jobs_space.route("/<uuid:id>/upload")
@@ -598,9 +649,9 @@ class Posts(Resource):
     @api.response(200, 'Return the first 100 public posts')
     @api.expect(parsers.posts_parser)
     @posts_space.marshal_list_with(jobs_marshal)
+    @auth.login_required()
     def get(self):
         args = parsers.posts_parser.parse_args(strict=True)
-        print(args)
         if args['tags[]'] is None:
             return model.get_all_public_posts()
         return model.get_public_posts_filtered_by_tags(args['tags[]'])

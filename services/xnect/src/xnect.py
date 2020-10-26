@@ -1,5 +1,6 @@
 import os
 from ctypes import *
+import cv2
 import pathlib
 import subprocess
 from flask import Flask, request, jsonify, send_from_directory

@@ -59,7 +59,9 @@ RUN make -j 8
 WORKDIR /xnect
 COPY ./xnect_library/ /xnect/
 COPY ./src/ /xnect/src/
+RUN apt update
 RUN apt install python3 python3-pip -y
+RUN pip3 install --upgrade pip
 WORKDIR /xnect/src/
 RUN pip3 install -r requirements.txt
 WORKDIR /xnect/build

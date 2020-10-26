@@ -127,13 +127,18 @@ void analyseVideo(std::string &videoFilePath, XNECT &xnect)
         CV_Error(CV_StsError, "Can not open Video file");
 
     //cap.get(CV_CAP_PROP_FRAME_COUNT) contains the number of frames in the video;
+    int index = 0;
     while(1)
     {
         Mat frame;
         cap >> frame; // get the next frame from video
         if(frame.empty())
             break;
-
+        if(index == 0) {
+            xnect.processHeight = cap.get(CAP_PROP_FRAME_HEIGHT);
+            xnect.processWidth = cap.get(CV_CAP_PROP_FRAME_WIDTH);
+        }
+        index++;
         xnect.processImg(frame);
         xnect.sendDataToUnity();
         drawPeople(frame, xnect);

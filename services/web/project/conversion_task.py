@@ -303,7 +303,7 @@ def convert_xnect(video):
 
     paths = analyse_xnect(video, job_id, result_cache_dir, result, model)
     raw2d, raw3d, ik3d = paths["raw2d"], paths["raw3d"], paths["ik3d"]
-    pred = xnect_to_bvh(raw2d, raw3d, ik3d)
+    pred = xnect_to_bvh(raw2d, raw3d, ik3d, result, model)
 
     keypoints = []
     last_cached = None
@@ -335,10 +335,13 @@ def convert_xnect(video):
     return True
 
 
-def xnect_to_bvh(raw2d_file, raw3d_file, ik3d_file):
+def xnect_to_bvh(raw2d_file, raw3d_file, ik3d_file, result, model):
     p2d = np.loadtxt(raw2d_file)
     p3d = np.loadtxt(raw3d_file)
     i3d = np.loadtxt(ik3d_file)
+    if len(i3d) == 0:
+        result.result_code = model.ResultCode.failure
+        return False
     num_people = int(np.max(p2d.T[1]) + 1)
     print(num_people)
     size = i3d.shape[0]
