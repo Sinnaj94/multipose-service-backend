@@ -16,7 +16,7 @@ services:
       - ./services/web/:/usr/src/app/
       - file-cache:/usr/data/
     expose:
-      - 5000
+      - "5000"
     env_file:
       - ./.env.dev
     depends_on:
@@ -52,8 +52,8 @@ services:
       - POSTGRES_USER=user
       - POSTGRES_PASSWORD=CHANGE_THIS_TO_A_STRONG_PASSWORD
       - POSTGRES_DB=mocap
-    ports:
-      - 5432:5432
+    expose:
+      - "5432"
 
   xnect:
     container_name: xnect
@@ -74,8 +74,8 @@ services:
     command: flask run --host=0.0.0.0 --port=8081
     stdin_open: true
     tty: true
-    ports:
-      - 8081:8081
+    expose:
+      - "5432"
 
   nginx:
     build: ./services/nginx
