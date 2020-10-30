@@ -118,6 +118,7 @@ class Jobs(db.Model):
     date_updated = db.Column(db.TIMESTAMP, default=datetime.now())
 
 
+# TODO: Change Result DIR
 class Results(db.Model):
     __tablename_ = 'results'
     id = db.Column(UUID(as_uuid=True), ForeignKey('jobs.id'), primary_key=True)

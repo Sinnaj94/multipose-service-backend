@@ -97,7 +97,7 @@ results_marshal = api.model('Result', {
     'date': fields.DateTime(dt_format='iso8601'),
     'output_video_url': fields.Url('api.results_result_output_video'),
     'output_bvh': fields.Url('api.results_result_bvh_file'),
-    'user': fields.Nested(user_marshal)
+    'render_url' : fields.Url('api.results_result_render_html')
 })
 
 tag_marshal = api.model('Tag', {
@@ -448,7 +448,7 @@ class JobThumbnail(Resource):
     @api.response(200, 'Return video file')
     def get(self, id):
         # check if job exists
-        job = model.get_job_by_id(id)
+        job = model.retrieve_job(id)
         directory = os.path.join(Config.CACHE_DIR, str(job.id))
         # check if result is succesful
         try:
@@ -648,8 +648,8 @@ posts_space = api.namespace('posts', description='Posts feed')
 class Posts(Resource):
     @api.response(200, 'Return the first 100 public posts')
     @api.expect(parsers.posts_parser)
-    @posts_space.marshal_list_with(jobs_marshal)
-    @auth.login_required()
+    @auth.login_required
+    @jobs_space.marshal_list_with(jobs_marshal)
     def get(self):
         args = parsers.posts_parser.parse_args(strict=True)
         if args['tags[]'] is None:

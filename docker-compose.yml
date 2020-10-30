@@ -9,14 +9,14 @@ services:
       context: ./services/web
     command:
       bash -c "python3 manage.py create_db
-      && python3 manage.py run -h 0.0.0.0"
+      && gunicorn --bind 0.0.0.0:5000 manage:app"
     environment:
       - APP_SETTINGS=project.config.Config
     volumes:
       - ./services/web/:/usr/src/app/
       - file-cache:/usr/data/
-    ports:
-      - 5000:5000
+    expose:
+      - 5000
     env_file:
       - ./.env.dev
     depends_on:
@@ -76,6 +76,13 @@ services:
     tty: true
     ports:
       - 8081:8081
+
+  nginx:
+    build: ./services/nginx
+    ports:
+      - 80:80
+    depends_on:
+      - web
 
 volumes:
   postgres_data:
