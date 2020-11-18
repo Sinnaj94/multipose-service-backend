@@ -72,6 +72,7 @@ RUN make clean
 RUN make -j8
 WORKDIR /xnect/bin/Release
 COPY ./src/xnect.py /xnect/bin/Release/xnect.py
+COPY ./src/XNECT.params /xnect/data/FullBodyTracker/XNECT.params
 ENV LANG C.UTF-8
 ENV LANG C.UTF-8
 # TODO: REMOVE THAT

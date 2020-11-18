@@ -1,0 +1,62 @@
+# Configuration file for XNect
+
+# Number of frames to accumulate data for rescaling the length of bones
+RescaleFrameNum: 2
+
+# Maximum number of people to track and visualize. More can be tracked, but the scene becomes too clutterd
+# to make out anything. Keeping it at 10 would work for most reasonable scenarios
+MaxNumPeople: 5
+
+## Pre-recorded Sequence Camera Calibration
+## Used for MuPoTS-3D Test seq from ts6-ts20
+ProcessHeight: 1080
+ProcessWidth: 1920
+FirstNetHeight: 448
+FirstNetWidth: 736
+OrigIntrinsics: 1130, 0, 504, 0, 1130, 256, 0, 0, 1
+
+## Pre-recorded Sequence Camera Calibration
+## Used for MuPoTS-3D Test seq from ts1-ts5
+#ProcessHeight: 1024
+#ProcessWidth: 1024
+#FirstNetHeight: 512
+#FirstNetWidth: 512
+#OrigIntrinsics: 1479.677, 0, 1008.087, 0, 1480.849, 1000.121, 0, 0, 1
+
+## Live Webcam Camera Calibration
+# camera type: webcam or playback
+#ProcessHeight: 360
+#ProcessWidth: 640
+#FirstNetHeight: 320
+#FirstNetWidth: 544
+#OrigIntrinsics:  576, 0, 320, 0, 576, 240, 0, 0, 1
+
+
+
+
+FirstNet: ../../data/CNNModels/XNECT/StageI/paper/net.prototxt
+FirstNetWeights: ../../data/CNNModels/XNECT/StageI/paper/snapshot.caffemodel
+
+
+#SecondNet: ../../data/CNNModels/XNECT/StageII/paper/net.prototxt
+#SecondNetWeights: ../../data/CNNModels/XNECT/StageII/paper/snapshot.caffemodel
+SecondNet: ../../data/CNNModels/XNECT/StageII/new/net.prototxt
+SecondNetWeights: ../../data/CNNModels/XNECT/StageII/new/snapshot.caffemodel
+
+# Write out 2D and 3D joint positions. It can slow processing down slightly if the joint positions are being written out.
+WritePositions: 1
+
+# Horizontally flip input to switch between a mirror interaction like setup and true view setup
+FlipInput: 0
+
+# To toggle filtering for 2D and 3D pose estimation
+UseOneEuroFilter2D: 1
+UseOneEuroFilter3D: 1
+
+# Skeleton fitting Parameters. You can try tweaking these to tune the skeleton fitting step to exhibit the
+# characteristics you desire from the skeletal motion
+IKTermWeight: 0.85
+IK2DTermWeight: 25e-6
+SmoothnessTermWeight: 1e-5
+JointLimitsTermWeight: 1
+DepthPenaltyWeight:6e-10

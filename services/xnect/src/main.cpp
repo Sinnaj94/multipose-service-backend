@@ -141,6 +141,7 @@ void analyseVideo(std::string &videoFilePath, XNECT &xnect)
         index++;
         xnect.processImg(frame);
         xnect.sendDataToUnity();
+        std::cout << xnect.getUnityData() << std::endl;
         drawPeople(frame, xnect);
         namedWindow("main", WINDOW_NORMAL);
         imshow("main", frame);

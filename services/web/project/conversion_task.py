@@ -296,6 +296,12 @@ def analyse_xnect(video, job_id, result_cache_dir, result, model):
         return False
 
 
+def interpolate_poses(pred, start, end):
+    start_data = pred[start]["ik3d"][0] * 0.01
+    end_data = pred[end]["ik3d"][0] * 0.01
+    print("Found one",start_data)
+
+
 def convert_xnect(video):
     job, job_id, model, job_cache_dir, pose2d_file, pose3d_file, thumbnail_path, filename, result, result_cache_dir,\
     fps = prepare(video)
@@ -306,15 +312,20 @@ def convert_xnect(video):
     pred = xnect_to_bvh(raw2d, raw3d, ik3d, result, model)
 
     keypoints = []
-    last_cached = None
+    last_cached_index = -1
+    num_cached = 0
     for idx in range(len(pred)):
         # TODO: Interpolate more
         if pred[idx]['valid_ik'][0]:
-            keypoints.append(pred[idx]["ik3d"][0] * 0.01)
-            last_cached = pred[idx]["ik3d"][0] * 0.01
+            keypoints.append(pred[idx]["adjusted_ik3d"][0] * 0.01)
+            if num_cached > 0:
+                pass
+                #interpolate_poses(pred, last_cached_index, idx)
+            last_cached_index = idx
         else:
-            if last_cached is not None:
-                keypoints.append(last_cached)
+            if last_cached_index > -1:
+                num_cached += 1
+                keypoints.append(pred[last_cached_index]["ik3d"][0] * 0.01)
 
     # interpolation via scipy
 
@@ -333,6 +344,42 @@ def convert_xnect(video):
     result.result_code = model.ResultCode.success
     model.db.session.commit()
     return True
+
+def euc_dist(a, b):
+    s = len(a)
+    summe = 0
+    for i in range(s):
+        summe += pow((a[i] - b[i]), 2)
+    return math.sqrt(summe)
+
+def calc_distance(a, b):
+    erg = 0
+    s = len(a)
+    for i in range(s):
+        erg += euc_dist(a[i], b[i])
+    return erg
+
+
+def readjust_person_index_ik3d(pred, max_people):
+    # pred[idx]["ik3d"][pidx]
+    # iterate through all keyframes
+    pred[0]['adjusted_ik3d'] = pred[0]["ik3d"]
+    for idx in range(1, len(pred)):
+        current_data = pred[idx]["ik3d"]
+        for pidx in range(len(pred[idx]["ik3d"])):
+            if pred[idx]["valid_ik"][pidx]:
+                idx_before = idx - 1
+                best_match = -1
+                distance = float('inf')
+                a = 0
+                # iterate through all people before this keyframe to find the closest match
+                for i, val in enumerate(pred[idx_before]["ik3d"]):
+                    cur_dist = calc_distance(current_data[pidx], val)
+                    if cur_dist < distance:
+                        distance = cur_dist
+                        best_match = i
+                print("Best match found", best_match)
+                pred[idx]['ik3d'][best_match] = current_data[pidx]
 
 
 def xnect_to_bvh(raw2d_file, raw3d_file, ik3d_file, result, model):
@@ -353,18 +400,28 @@ def xnect_to_bvh(raw2d_file, raw3d_file, ik3d_file, result, model):
             "pred2d": np.zeros([num_people, 14, 2]),
             "pred3d": np.zeros([num_people, 21, 3]),
             "ik3d": np.zeros([num_people, 21, 3]),
+            "adjusted_ik3d": np.zeros([num_people, 21, 3]),
             "vis": np.zeros([num_people, 14, 1]),
             "valid_raw": np.zeros([num_people], dtype=bool),
             "valid_ik": np.zeros([num_people], dtype=bool)
         })
+
+    # after an analysis, XNECT seems to output corrupt data. we fix that by the following lines:
+    keyframe_index = -1
+    for i in range(p3d.shape[0]):
+        pass
+
     # iterate through keyframes of p3d
+    origin = None
     for i in range(p3d.shape[0]):
         idx = int(p2d[i][0])
         pidx = int(p2d[i][1])
         pred[idx]["pred2d"][pidx] = np.reshape(p2d[i][2:], [14, 2])
         tmp = np.reshape(p3d[i][2:], [21, 3])
-
-        pred[idx]["pred3d"][pidx] = tmp - tmp[14]
+        if origin is None:
+            direction_vector = tmp[13] - tmp[10]
+            origin = tmp[13] - direction_vector * .5
+        pred[idx]["pred3d"][pidx] = tmp - origin
         pred[idx]["valid_raw"][pidx] = True
         pred[idx]["vis"][pidx] = (np.greater(pred[idx]["pred2d"][pidx].T[0], 0) &
                                   np.greater(pred[idx]["pred2d"][pidx].T[1], 0)).reshape([14, 1])
@@ -379,4 +436,6 @@ def xnect_to_bvh(raw2d_file, raw3d_file, ik3d_file, result, model):
             origin = tmp[13] - direction_vector * .5
         pred[idx]["ik3d"][pidx] = tmp - origin
         pred[idx]["valid_ik"][pidx] = True
+    print("Readjusting person index ik3d")
+    readjust_person_index_ik3d(pred, num_people)
     return pred
