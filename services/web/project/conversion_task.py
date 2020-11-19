@@ -6,6 +6,9 @@ from pathlib import Path
 import requests
 from bvh_smooth.smooth_position import butterworth as pos_butterworth
 from bvh_smooth.smooth_rotation import butterworth as rot_butterworth
+from bvh_smooth.smooth_position import average as pos_avrg
+from bvh_smooth.smooth_rotation import average as rot_avrg
+
 import cv2
 import skvideo.io
 from flask import request
@@ -17,6 +20,7 @@ from video2bvh.utils import smooth, vis, camera
 from project.config import Config
 import numpy as np
 from video2bvh.bvh_skeleton import muco_3dhp_skeleton
+
 
 # from IPython.display import HTML
 
@@ -299,7 +303,7 @@ def analyse_xnect(video, job_id, result_cache_dir, result, model):
 def interpolate_poses(pred, start, end):
     start_data = pred[start]["ik3d"][0] * 0.01
     end_data = pred[end]["ik3d"][0] * 0.01
-    print("Found one",start_data)
+    print("Found one", start_data)
 
 
 def convert_xnect(video):
@@ -309,41 +313,35 @@ def convert_xnect(video):
 
     paths = analyse_xnect(video, job_id, result_cache_dir, result, model)
     raw2d, raw3d, ik3d = paths["raw2d"], paths["raw3d"], paths["ik3d"]
-    pred = xnect_to_bvh(raw2d, raw3d, ik3d, result, model)
+    pred, first_complete, num_people  = xnect_to_bvh(raw2d, raw3d, ik3d, result, model)
 
     keypoints = []
     last_cached_index = -1
-    num_cached = 0
-    for idx in range(len(pred)):
-        # TODO: Interpolate more
-        if pred[idx]['valid_ik'][0]:
-            keypoints.append(pred[idx]["adjusted_ik3d"][0] * 0.01)
-            if num_cached > 0:
-                pass
-                #interpolate_poses(pred, last_cached_index, idx)
-            last_cached_index = idx
-        else:
-            if last_cached_index > -1:
-                num_cached += 1
-                keypoints.append(pred[last_cached_index]["ik3d"][0] * 0.01)
+    for pidx in range(num_people):
+        person_keypoints = []
+        for idx in range(first_complete, len(pred)):
+            # TODO: Interpolate more
+            if pred[idx]['valid_ik'][pidx] and not pred[idx]['is_outlier'][pidx]:
+                person_keypoints.append(pred[idx]["ik3d"][pidx] * 0.01)
+                last_cached_index = idx
+            else:
+                if last_cached_index > -1:
+                    person_keypoints.append(pred[last_cached_index]["ik3d"][pidx] * 0.01)
+        keypoints.append(person_keypoints)
 
     # interpolation via scipy
+    for i in range(len(keypoints)):
+        print("Saving bvh nr.", i)
+        skel = muco_3dhp_skeleton.Muco3DHPSkeleton()
+        raw = result_cache_dir / (Config.OUTPUT_BVH_FILE_RAW_NUMBERED % (i + 1))
+        # raw file
+        channels, header = skel.poses2bvh(np.array(keypoints[i]), output_file=raw, frame_rate=fps)
 
-    print("Saving bvh")
-    skel = muco_3dhp_skeleton.Muco3DHPSkeleton()
-    raw = result_cache_dir / Config.OUTPUT_BVH_FILE_RAW
-    # raw file
-    channels, header = skel.poses2bvh(np.array(keypoints), output_file=raw, frame_rate=fps)
-    # smoothen
-    # TODO: Dynamic or static?
-    for i in range(len(Config.OUTPUT_FILTER_FACTORS)):
-        border = Config.OUTPUT_FILTER_FACTORS[i]
-        filename = result_cache_dir / (Config.OUTPUT_BVH_FILE_FILTERED % (i + 1))
-        rot_butterworth(raw, filename, border=border, u0=10)
-        pos_butterworth(filename, filename, border=border, u0=10)
     result.result_code = model.ResultCode.success
+    result.max_people = num_people
     model.db.session.commit()
     return True
+
 
 def euc_dist(a, b):
     s = len(a)
@@ -351,6 +349,7 @@ def euc_dist(a, b):
     for i in range(s):
         summe += pow((a[i] - b[i]), 2)
     return math.sqrt(summe)
+
 
 def calc_distance(a, b):
     erg = 0
@@ -360,26 +359,65 @@ def calc_distance(a, b):
     return erg
 
 
-def readjust_person_index_ik3d(pred, max_people):
-    # pred[idx]["ik3d"][pidx]
-    # iterate through all keyframes
-    pred[0]['adjusted_ik3d'] = pred[0]["ik3d"]
-    for idx in range(1, len(pred)):
-        current_data = pred[idx]["ik3d"]
+def find_first_complete_keyframe(pred, num_people):
+    for idx in range(0, len(pred)):
+        valid = 0
+        for pidx in range(len(pred[idx]["valid_ik"])):
+            if pred[idx]["valid_ik"][pidx]:
+                valid += 1
+                if valid == num_people:
+                    return idx
+
+
+def sort(start, end, pred, backwards=False):
+    step = 1
+    if backwards:
+        step = -1
+    for idx in range(start, end, step):
+        current_data = np.empty_like(pred[idx]["ik3d"])
+        current_valid = np.empty_like(pred[idx]["valid_ik"])
         for pidx in range(len(pred[idx]["ik3d"])):
             if pred[idx]["valid_ik"][pidx]:
-                idx_before = idx - 1
+                if backwards:
+                    deltaidx = idx + 1
+                else:
+                    deltaidx = idx - 1
                 best_match = -1
                 distance = float('inf')
                 a = 0
-                # iterate through all people before this keyframe to find the closest match
-                for i, val in enumerate(pred[idx_before]["ik3d"]):
-                    cur_dist = calc_distance(current_data[pidx], val)
+                for i, val in enumerate(pred[deltaidx]["ik3d"]):
+                    cur_dist = calc_distance(pred[idx]["ik3d"][pidx], val)
                     if cur_dist < distance:
                         distance = cur_dist
                         best_match = i
-                print("Best match found", best_match)
-                pred[idx]['ik3d'][best_match] = current_data[pidx]
+                current_data[best_match] = pred[idx]["ik3d"][pidx]
+                current_valid[best_match] = pred[idx]["valid_ik"][pidx]
+            else:
+                pass
+        pred[idx]["ik3d"] = current_data
+        pred[idx]["valid_ik"] = current_valid
+
+
+def outlier_map(pred, num_people, m):
+    for pidx in range(0, num_people):
+        dists = np.zeros(len(pred))
+        for idx in range(len(pred)):
+            dists[idx] = calc_distance(pred[idx]["ik3d"][pidx], pred[idx - 1]["ik3d"][pidx])
+        mean = np.mean(dists)
+        outlier_map = [(dist > mean * m) for dist in dists]
+        for i in range(len(outlier_map)):
+            pred[i]["is_outlier"][pidx] = outlier_map[i]
+
+
+def readjust_person_index_ik3d(pred, max_people):
+    first_complete = find_first_complete_keyframe(pred, max_people)
+    print("First complete", first_complete)
+    print("Forward sort")
+    sort(1, len(pred), pred, False)
+    print("Backwards sort")
+    sort(len(pred) - 2, 0, pred, True)
+    outlier_map(pred, max_people, 3)
+    return first_complete
 
 
 def xnect_to_bvh(raw2d_file, raw3d_file, ik3d_file, result, model):
@@ -403,13 +441,9 @@ def xnect_to_bvh(raw2d_file, raw3d_file, ik3d_file, result, model):
             "adjusted_ik3d": np.zeros([num_people, 21, 3]),
             "vis": np.zeros([num_people, 14, 1]),
             "valid_raw": np.zeros([num_people], dtype=bool),
-            "valid_ik": np.zeros([num_people], dtype=bool)
+            "valid_ik": np.zeros([num_people], dtype=bool),
+            "is_outlier": np.zeros([num_people], dtype=bool)
         })
-
-    # after an analysis, XNECT seems to output corrupt data. we fix that by the following lines:
-    keyframe_index = -1
-    for i in range(p3d.shape[0]):
-        pass
 
     # iterate through keyframes of p3d
     origin = None
@@ -437,5 +471,5 @@ def xnect_to_bvh(raw2d_file, raw3d_file, ik3d_file, result, model):
         pred[idx]["ik3d"][pidx] = tmp - origin
         pred[idx]["valid_ik"][pidx] = True
     print("Readjusting person index ik3d")
-    readjust_person_index_ik3d(pred, num_people)
-    return pred
+    first_complete = readjust_person_index_ik3d(pred, num_people)
+    return pred, first_complete, num_people

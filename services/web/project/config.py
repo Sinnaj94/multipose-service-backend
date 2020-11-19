@@ -26,6 +26,7 @@ class Config(object):
     OUTPUT_VIDEO_FILE = "output_video.mp4"
     OUTPUT_BVH_FILE = "output_bvh.bvh"
     OUTPUT_BVH_FILE_RAW = "output_raw.bvh"
+    OUTPUT_BVH_FILE_RAW_NUMBERED = "output_raw_%d.bvh"
     OUTPUT_BVH_FILE_FILTERED = "output_filtered_%i.bvh"
     OUTPUT_BVH_FILE_FILTERED_DYNAMIC = "output_filtered.bvh"
     OUTPUT_FILTER_FACTORS = [10, 100, 1000]

@@ -124,6 +124,7 @@ class Results(db.Model):
     id = db.Column(UUID(as_uuid=True), ForeignKey('jobs.id'), primary_key=True)
     user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
     result_code = db.Column(db.Enum(ResultCode), nullable=False, default=ResultCode.default)
+    max_people = db.Column(db.Integer, default=0)
     date = db.Column(db.TIMESTAMP, default=datetime.now(), nullable=False)
 
 

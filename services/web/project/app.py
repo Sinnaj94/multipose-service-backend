@@ -13,7 +13,7 @@ from rq.exceptions import NoSuchJobError
 from flask import Flask, Blueprint, g, jsonify, send_from_directory, url_for, make_response, render_template, redirect, \
     send_file
 from flask_restplus import Api, Resource, abort, fields, ValidationError
-from werkzeug.exceptions import HTTPException, NotFound
+from werkzeug.exceptions import HTTPException, NotFound, BadRequest
 from project import parsers
 from rq import Queue, Connection
 
@@ -93,6 +93,7 @@ user_marshal = api.model('User', {
 })
 results_marshal = api.model('Result', {
     'id': fields.String,
+    'max_people': fields.Integer,
     'result_code': fields.Integer(description="Result Code - Success: 1; Failure: 0; Pending: -1"),
     'date': fields.DateTime(dt_format='iso8601'),
     'output_video_url': fields.Url('api.results_result_output_video'),
@@ -516,19 +517,12 @@ class ResultOutputVideo(Resource):
 
 @results_space.route("/<uuid:id>/bvh")
 class ResultBvhFile(Resource):
-    #@auth.login_required
+    @auth.login_required
     @api.produces(["application/octet-stream"])
-    @api.response(200, 'Return bvh file')
+    @api.response(200, 'Return first bvh file')
     def get(self, id):
-        result = model.get_result_by_id(id)
-        if result is None:
-            return 404
-        if result.result_code is not model.ResultCode.success:
-            return 202
-        path = os.path.join(Config.CACHE_DIR, str(result.id), Config.RESULT_DIR)
-        return send_from_directory(path, Config.OUTPUT_BVH_FILE_RAW, as_attachment=True,
-                                   attachment_filename=str(result.id) + ".bvh",
-                                   mimetype="application/octet-stream")
+        return redirect(url_for('api.results_result_bvh_file_for_person', id=id, person_id=1))
+
 
 
 def filter_bvh(id, border, u0):
@@ -560,20 +554,23 @@ class ResultBvhFileFilteredDynamic(Resource):
                                           mimetype="application/octet-stream")
 
 
-@results_space.route("/<uuid:id>/bvh/<int:factor>")
-class ResultBvhFileFiltered(Resource):
+@results_space.route("/<uuid:id>/bvh/<int:person_id>")
+class ResultBvhFileForPerson(Resource):
     @api.produces(["application/octet-stream"])
     @api.response(200, 'Return bvh file')
-    def get(self, id, factor):
+    def get(self, id, person_id):
         result = model.get_result_by_id(id)
         if result is None:
             return 404
         if result.result_code is not model.ResultCode.success:
             return 202
+        if person_id > result.max_people or person_id < 1:
+            raise BadRequest("Person %d does not exist - Max index is %d." % (person_id, result.max_people))
         path = os.path.join(Config.CACHE_DIR, str(result.id), Config.RESULT_DIR)
-        print(Config.OUTPUT_BVH_FILE_FILTERED % factor)
-        return send_from_directory(path, Config.OUTPUT_BVH_FILE_FILTERED % factor, as_attachment=True,
-                                   attachment_filename=str(result.id) + ".bvh",
+        job = model.get_job_by_id(id)
+        myfile = "%s by %s (%d/%d).bvh" % (job.name, job.user.username, person_id, result.max_people)
+        return send_from_directory(path, Config.OUTPUT_BVH_FILE_RAW_NUMBERED % person_id, as_attachment=True,
+                                   attachment_filename=myfile,
                                    mimetype="application/octet-stream")
 
 
@@ -581,22 +578,16 @@ class ResultBvhFileFiltered(Resource):
 class ResultRenderHTML(Resource):
     @api.expect(parsers.render_parser)
     def get(self, id):
-        args = parsers.render_parser.parse_args(strict=True)
-        headers = {'Content-Type' : 'text/html'}
-        return make_response(render_template('bvh_import/index.html', auto_rotate=args['autorotate'], current_url=url_for('api.results_result_bvh_file', id=id)), 200, headers)
+        return redirect(url_for("api.results_result_render_html_for_person", id=id, person_id=1))
 
 
-@results_space.route("/<uuid:id>/render_html/<int:factor>")
-class ResultRenderHTMLFiltered(Resource):
-    def get(self, id, factor):
+@results_space.route("/<uuid:id>/render_html/<int:person_id>")
+class ResultRenderHTMLForPerson(Resource):
+    def get(self, id, person_id):
         headers = {'Content-Type' : 'text/html'}
-        if factor == 0:
-            return make_response(render_template('bvh_import/index.html',
-                                                 current_url=url_for('api.results_result_bvh_file', id=id)), 200,
-                                 headers)
         return make_response(render_template('bvh_import/index.html',
-                                             current_url=url_for('api.results_result_bvh_file_filtered', id=id,factor=factor),
-                                             original_url=url_for('api.results_result_bvh_file', id=id)
+                                             current_url=url_for('api.results_result_bvh_file_for_person', id=id, person_id=person_id),
+                                             original_url=url_for('api.results_result_bvh_file_for_person', id=id, person_id=person_id)
                                              ), 200, headers)
 
 
