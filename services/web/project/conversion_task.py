@@ -280,11 +280,17 @@ def analyse_xnect(video, job_id, result_cache_dir, result, model):
     # Make request to xnect server
     try:
         files = {"video": ("video.mp4", video, "video/mp4")}
-        r = requests.post("http://xnect:8081/%s" % str(job_id), files=files)
+        r = requests.post("http://xnect:8081/%s" % str(job_id), files=files, timeout=999999)
         if r.status_code != 200:
             result.result_code = model.ResultCode.failure
             model.db.session.commit()
             return False
+        finished = False
+        while not finished:
+            r = requests.get("http://xnect:8081/finished")
+            finished = r.json()['finished']
+            print("Not yet finished...")
+            time.sleep(1)
 
         urls = ["raw2d", "raw3d", "ik3d"]
         paths = {}
@@ -292,6 +298,10 @@ def analyse_xnect(video, job_id, result_cache_dir, result, model):
             r = requests.get("http://xnect:8081/%s/%s" % (str(job_id), url))
             path = os.path.join(result_cache_dir, "%s.txt" % url)
             open(path, 'wb').write(r.content)
+            if os.path.getsize(path) <= 1:
+                result.result_code = model.ResultCode.failure
+                model.db.session.commit()
+                return False
             paths[url] = path
         return paths
     except:
@@ -312,8 +322,10 @@ def convert_xnect(video):
     job.meta['stage'] = {'name': 'xnect', 'progress': None}
 
     paths = analyse_xnect(video, job_id, result_cache_dir, result, model)
+    if paths is False:
+        return False
     raw2d, raw3d, ik3d = paths["raw2d"], paths["raw3d"], paths["ik3d"]
-    pred, first_complete, num_people  = xnect_to_bvh(raw2d, raw3d, ik3d, result, model)
+    pred, first_complete, num_people = xnect_to_bvh(raw2d, raw3d, ik3d, result, model)
 
     keypoints = []
     last_cached_index = -1

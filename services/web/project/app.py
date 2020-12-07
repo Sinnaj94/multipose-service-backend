@@ -183,8 +183,8 @@ user_parser.add_argument('username', type=min_length(5), required=True, location
 user_parser.add_argument('password', type=min_length(5), required=True, location='form')
 
 filter_parser = api.parser()
-filter_parser.add_argument('border', type=int, required=True, location='args')
-filter_parser.add_argument('u0', type=int, required=True, location='args')
+filter_parser.add_argument('border', type=int, location='args')
+filter_parser.add_argument('u0', type=int, location='args')
 
 # source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
 @user_space.route("/", endpoint='with-parser')
@@ -375,6 +375,11 @@ class JobUploadVideo(Resource):
             model.db.session.commit()
             return job
 
+@jobs_space.route("/failed")
+class FailedJobs(Resource):
+    @auth.login_required
+    def delete(self):
+        return model.delete_failed_jobs(g.user.id)
 
 @jobs_space.route("/<uuid:id>")
 @api.response(401, 'The user is not permitted to do this action')
@@ -459,6 +464,13 @@ class JobThumbnail(Resource):
             abort(404)
 
 
+@jobs_space.route("/statistics")
+class JobStats(Resource):
+    @auth.login_required
+    @api.response(200, 'Return statistics about jobs')
+    def get(self):
+        return jsonify(model.get_job_stats(g.user.id))
+
 class ResultFailedException(HTTPException):
     code = 404
     description = "Result has failed, hence there is no video"
@@ -515,50 +527,66 @@ class ResultOutputVideo(Resource):
                                    mimetype="video/mp4")
 
 
+def serve_zip(job, result):
+    path = os.path.join(Config.CACHE_DIR, str(result.id), Config.RESULT_DIR)
+    file_name = os.path.join(path, "bvhs.zip")
+    if os.path.exists(file_name):
+        return send_from_directory(path,
+                                   "bvhs.zip",
+                                   attachment_filename="%s by %s.zip" % (job.name, job.user.username),
+                                   as_attachment=True,
+                                   mimetype="application/zip")
+    with zipfile.ZipFile(file_name, "w") as zf:
+        for i in range(1, result.max_people + 1):
+            name = "%s by %s (%d-%d).bvh" % (job.name, job.user.username, i, result.max_people)
+            zf.write(os.path.join(path, Config.OUTPUT_BVH_FILE_RAW_NUMBERED % i), arcname=name)
+    print("Zipped success...")
+    return send_from_directory(path,
+                               "bvhs.zip",
+                               attachment_filename="%s by %s.zip" % (job.name, job.user.username),
+                               as_attachment=True,
+                               mimetype="application/zip")
+
+
 @results_space.route("/<uuid:id>/bvh")
 class ResultBvhFile(Resource):
     @auth.login_required
     @api.produces(["application/octet-stream"])
     @api.response(200, 'Return first bvh file')
     def get(self, id):
-        return redirect(url_for('api.results_result_bvh_file_for_person', id=id, person_id=1))
-
-
-
-def filter_bvh(id, border, u0):
-    path = os.path.join(Config.CACHE_DIR, str(id), Config.RESULT_DIR)
-    raw = os.path.join(path, Config.OUTPUT_BVH_FILE_RAW)
-    output = os.path.join(path, Config.OUTPUT_BVH_FILE_FILTERED_DYNAMIC)
-    rot_butterworth(raw, output, border, u0)
-    rot_butterworth(output, output, border, u0)
-    rot_butterworth(raw, output, border, u0)
-    rot_butterworth(output, output, border, u0)
-
-
-@results_space.route("<uuid:id>/bvh/filtered")
-class ResultBvhFileFilteredDynamic(Resource):
-    @api.produces(["application/octet-stream"])
-    @api.response(200, 'Return bvh file')
-    @api.expect(filter_parser)
-    def get(self, id):
-        args = filter_parser.parse_args(strict=True)
         result = model.get_result_by_id(id)
+        job = model.get_job_by_id(id)
         if result is None:
             return 404
         if result.result_code is not model.ResultCode.success:
             return 202
-        filter_bvh(result.id, args['border'], args['u0'])
         path = os.path.join(Config.CACHE_DIR, str(result.id), Config.RESULT_DIR)
-        return send_from_directory(path, Config.OUTPUT_BVH_FILE_FILTERED_DYNAMIC, as_attachment=True,
-                                          attachment_filename=str(result.id) + ".bvh",
-                                          mimetype="application/octet-stream")
+        # return 1 person
+        if result.max_people == 1:
+            myfile = "%s by %s (%d-%d).bvh" % (job.name, job.user.username, 1, result.max_people)
+            return send_from_directory(path, Config.OUTPUT_BVH_FILE_RAW_NUMBERED % 1, as_attachment=True,
+                                               attachment_filename=myfile,
+                                               mimetype="application/octet-stream")
+        return serve_zip(job, result)
+
+
+
+
+def filter_bvh(id, border, u0, nr):
+    path = os.path.join(Config.CACHE_DIR, str(id), Config.RESULT_DIR)
+    raw = os.path.join(path, Config.OUTPUT_BVH_FILE_RAW_NUMBERED % nr)
+    output = os.path.join(path, Config.OUTPUT_BVH_FILE_FILTERED_DYNAMIC_NUMBERED % nr)
+    rot_butterworth(raw, output, border, u0)
+    #pos_butterworth(output, output, border, u0)
 
 
 @results_space.route("/<uuid:id>/bvh/<int:person_id>")
 class ResultBvhFileForPerson(Resource):
     @api.produces(["application/octet-stream"])
     @api.response(200, 'Return bvh file')
+    @api.expect(filter_parser)
     def get(self, id, person_id):
+        args = filter_parser.parse_args(strict=True)
         result = model.get_result_by_id(id)
         if result is None:
             return 404
@@ -568,7 +596,12 @@ class ResultBvhFileForPerson(Resource):
             raise BadRequest("Person %d does not exist - Max index is %d." % (person_id, result.max_people))
         path = os.path.join(Config.CACHE_DIR, str(result.id), Config.RESULT_DIR)
         job = model.get_job_by_id(id)
-        myfile = "%s by %s (%d/%d).bvh" % (job.name, job.user.username, person_id, result.max_people)
+        myfile = "%s by %s (%d-%d).bvh" % (job.name, job.user.username, person_id, result.max_people)
+        if args['border'] is not None and args['u0'] is not None:
+            filter_bvh(result.id, args['border'], args['u0'], person_id)
+            return send_from_directory(path, Config.OUTPUT_BVH_FILE_FILTERED_DYNAMIC_NUMBERED % person_id, as_attachment=True,
+                                              attachment_filename=myfile,
+                                              mimetype="application/octet-stream")
         return send_from_directory(path, Config.OUTPUT_BVH_FILE_RAW_NUMBERED % person_id, as_attachment=True,
                                    attachment_filename=myfile,
                                    mimetype="application/octet-stream")
@@ -577,17 +610,35 @@ class ResultBvhFileForPerson(Resource):
 @results_space.route("/<uuid:id>/render_html")
 class ResultRenderHTML(Resource):
     @api.expect(parsers.render_parser)
+    @api.expect(filter_parser)
     def get(self, id):
-        return redirect(url_for("api.results_result_render_html_for_person", id=id, person_id=1))
+        args = filter_parser.parse_args(strict=True)
+        headers = {'Content-Type' : 'text/html'}
+        num_people = model.get_result_by_id(id).max_people
+        urls = []
+        if args['border'] is None or args['u0'] is None:
+            for i in range(1, num_people + 1):
+                urls.append(url_for('api.results_result_bvh_file_for_person', id=id, person_id=i))
+        else:
+            for i in range(1, num_people + 1):
+                #ResultBvhFileForPersonFiltered
+                urls.append(url_for('api.results_result_bvh_file_for_person', id=id, person_id=i,
+                                    border=args['border'], u0=args['u0']))
+                print(urls)
+        return make_response(render_template('bvh_import/index.html',
+                                             url_array=urls), 200, headers)
+        #return redirect(url_for("api.results_result_render_html_for_person", id=id, person_id=1), 303)
 
 
 @results_space.route("/<uuid:id>/render_html/<int:person_id>")
 class ResultRenderHTMLForPerson(Resource):
+    @api.expect(filter_parser)
     def get(self, id, person_id):
         headers = {'Content-Type' : 'text/html'}
+        args = filter_parser.parse_args(strict=True)
+        url = [url_for('api.results_result_bvh_file_for_person', id=id, person_id=person_id, border=args['border'], u0=args['u0'])]
         return make_response(render_template('bvh_import/index.html',
-                                             current_url=url_for('api.results_result_bvh_file_for_person', id=id, person_id=person_id),
-                                             original_url=url_for('api.results_result_bvh_file_for_person', id=id, person_id=person_id)
+                                             url_array=url
                                              ), 200, headers)
 
 
@@ -653,12 +704,12 @@ class SinglePost(Resource):
     @auth.login_required
     @jobs_space.marshal_with(jobs_marshal)
     def post(self, id):
-        return model.set_job_public(id)
+        return model.set_job_public(id, g.user.id)
 
     @auth.login_required
     @jobs_space.marshal_with(jobs_marshal)
     def delete(self, id):
-        return model.set_job_private(id)
+        return model.set_job_private(id, g.user.id)
 
 
 model.db.init_app(app)

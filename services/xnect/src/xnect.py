@@ -9,8 +9,8 @@ app = Flask(__name__)
 
 UPLOAD_FOLDER = "/xnect/videos/"
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['FINISHED'] = False
 my_status = {}
-
 
 class InvalidUsage(Exception):
     status_code = 400
@@ -34,10 +34,16 @@ def status():
     return jsonify({"message": "XNECT running."})
 
 
+@app.route("/finished")
+def finished():
+    return jsonify({"finished": app.config['FINISHED']})
+
+
 @app.route("/<uuid:id>", methods=['GET', 'POST'])
 def analyse(id):
     if request.method == 'POST':
         print(request.files)
+        app.config['FINISHED'] = False
         if 'video' not in request.files:
             print("NO VIDEO")
             return jsonify({"message": "bad request"}), 400
@@ -56,6 +62,7 @@ def analyse(id):
         try:
             subprocess.run("./XNECT " + folder, shell=True, check=True)
             my_status[str(id)] = True
+            app.config['FINISHED'] = True
             return jsonify({"message": "success"})
         except subprocess.CalledProcessError as e:
             return jsonify({"code": e.returncode}), 400

@@ -8,32 +8,38 @@ import { BVHLoader } from 'three/examples/jsm/loaders/BVHLoader';
 var clock = new THREE.Clock();
 
 var camera, controls, scene, renderer;
-var mixer, skeletonHelper;
-var mixer1, skeletonHelper1;
-const dataURL = document.getElementById("current-url").content
+var mixer, skeletonHelper, mixer1, skeletonHelper1;
+var mixers = [], skeletonHelpers = []
+const newURLS = JSON.parse(document.getElementById("urls-array").content.replace(/'/g, '"'))
+const dataURL = newURLS[0]
 const originalURL = document.getElementById("original-url").content
 const rotate = document.getElementById("auto-rotate").content === "True"
 init();
 animate();
 
-var loader = new BVHLoader();
-loader.load(dataURL, function ( result ) {
+for(var i = 0; i < newURLS.length; i++) {
+	var loader = new BVHLoader()
+	console.log(newURLS[i])
 
-	skeletonHelper = new THREE.SkeletonHelper( result.skeleton.bones[ 0 ] );
-	skeletonHelper.skeleton = result.skeleton; // allow animation mixer to bind to THREE.SkeletonHelper directly
+	loader.load(newURLS[i], function(result) {
+		skeletonHelper = new THREE.SkeletonHelper( result.skeleton.bones[ 0 ] );
+		skeletonHelper.skeleton = result.skeleton; // allow animation mixer to bind to THREE.SkeletonHelper directly
+		var boneContainer = new THREE.Group();
+		boneContainer.add( result.skeleton.bones[ 0 ] );
 
-	var boneContainer = new THREE.Group();
-	boneContainer.add( result.skeleton.bones[ 0 ] );
+		scene.add( skeletonHelper );
+		scene.add( boneContainer );
 
-	scene.add( skeletonHelper );
-	scene.add( boneContainer );
-
-	// play animation
-	mixer = new THREE.AnimationMixer( skeletonHelper );
-	mixer.clipAction( result.clip ).setEffectiveWeight( 1.0 ).play();
-	if(mixer1 != null) mixer.setTime(mixer1.time)
-
-} );
+		// play animation
+		mixer = new THREE.AnimationMixer( skeletonHelper );
+		mixer.clipAction( result.clip ).setEffectiveWeight( 1.0 ).play();
+		mixers.push(mixer);
+	})
+}
+// Reset time
+mixers.forEach(m => {
+	m.setTime(0)
+})
 
 function init() {
 
@@ -41,6 +47,7 @@ function init() {
 	camera.position.set( 0, 200, 300 );
 	var pos = localStorage.getItem('camera_position')
 	var rot = localStorage.getItem('camera_rotation')
+	// Reset Camera position to last browser position
 	if(pos!=null && rot != null) {
 		pos = JSON.parse(pos)
 		rot = JSON.parse(rot)
@@ -99,8 +106,9 @@ function animate() {
 
 	var delta = clock.getDelta();
 
-	if ( mixer ) mixer.update( delta );
-	if (mixer1) mixer1.update(delta);
+	mixers.forEach(m => {
+		m.update(delta)
+	})
 
 	renderer.render( scene, camera );
 

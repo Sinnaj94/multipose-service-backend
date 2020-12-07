@@ -29,6 +29,7 @@ class Config(object):
     OUTPUT_BVH_FILE_RAW_NUMBERED = "output_raw_%d.bvh"
     OUTPUT_BVH_FILE_FILTERED = "output_filtered_%i.bvh"
     OUTPUT_BVH_FILE_FILTERED_DYNAMIC = "output_filtered.bvh"
+    OUTPUT_BVH_FILE_FILTERED_DYNAMIC_NUMBERED = "output_filtered_%d.bvh"
     OUTPUT_FILTER_FACTORS = [10, 100, 1000]
     DATA_2D_FILE = "data_2d.npy"
     CONFIG_2D_FILE = "config_2d.npy"

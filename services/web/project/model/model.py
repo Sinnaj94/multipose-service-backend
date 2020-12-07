@@ -132,6 +132,7 @@ class Results(db.Model):
 EVENT LISTENERS
 """
 
+
 @db.event.listens_for(Jobs, "after_insert")
 def create_result(mapper, connection, target):
     re = Results.__table__
@@ -142,8 +143,6 @@ def create_result(mapper, connection, target):
 def notify_observers(mapper, connection, target):
     app.logger.debug("New waiting result was inserted. Notifying app.")
     # notify_analysis()
-
-
 
 
 """methods"""
@@ -163,6 +162,10 @@ class PersonIDRequired(HTTPException):
     code = 400
     description = "Missing argument: Person ID"
 
+
+class Forbidden(HTTPException):
+    code = 403
+    description = "You are not allowed to do that."
 
 def retrieve_job(job_id):
     job = Jobs.query.get(job_id)
@@ -201,7 +204,6 @@ def get_result_by_job_id(job_id):
 
 
 def get_jobs_by_user_id(user_id, **kwargs):
-
     jobs = db.session.query(Jobs).filter_by(user_id=user_id).order_by(desc(Jobs.date_updated))
     if kwargs['result_code'] is not None:
         jobs = jobs.join(Results, Jobs.result).filter(
@@ -312,10 +314,13 @@ class JobNotFinished(werkzeug.exceptions.HTTPException):
     code = 409
     description = "Job is not finished and cannot be posted."
 
-def set_job_public(id):
+
+def set_job_public(id, user_id):
     job = retrieve_job(id)
     if get_result_by_id(id).result_code != ResultCode.success:
         raise JobNotFinished
+    if job.user.id != user_id:
+        raise Forbidden
     job.public = True
     db.session.commit()
     return job
@@ -326,10 +331,12 @@ def get_public_posts_filtered_by_tags(tags):
     return t.order_by(desc(Jobs.date_updated)).all()
 
 
-def set_job_private(id):
+def set_job_private(id, user_id):
     job = retrieve_job(id)
     if get_result_by_id(id).result_code != ResultCode.success:
         raise JobNotFinished
+    if job.user.id != user_id:
+        raise Forbidden
     job.public = False
     db.session.commit()
     return job
@@ -374,3 +381,26 @@ def get_bookmarks_by_user(id, tags):
     for bookmark in bookmarks.all():
         jobs.append(bookmark.job)
     return jobs
+
+
+def get_job_stats(user_id):
+    jobs = db.session.query(Jobs).filter_by(user_id=user_id).order_by(desc(Jobs.date_updated))
+    num_failed = jobs.join(Results, Jobs.result).filter(
+        Results.result_code == ResultCode(-1)).count()
+    num_pending = jobs.join(Results, Jobs.result).filter(
+            Results.result_code == ResultCode(2)).count()
+    num_pending = jobs.join(Results, Jobs.result).filter(
+        Results.result_code == ResultCode(0)).count()
+    num_success = jobs.join(Results, Jobs.result).filter(
+        Results.result_code == ResultCode(1)).count()
+    return {"failed": num_failed, "pending": num_pending, "success": num_success}
+
+
+def delete_failed_jobs(user_id):
+    results = db.session.query(Results).filter_by(user_id=user_id, result_code=ResultCode(-1))
+    count = results.count()
+    for r in results.all():
+        db.session.query(Results).filter_by(id=r.id).delete()
+        db.session.query(Jobs).filter_by(id=r.id).delete()
+    results.delete()
+    return count

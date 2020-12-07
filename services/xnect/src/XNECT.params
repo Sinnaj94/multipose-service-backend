@@ -5,7 +5,7 @@ RescaleFrameNum: 2
 
 # Maximum number of people to track and visualize. More can be tracked, but the scene becomes too clutterd
 # to make out anything. Keeping it at 10 would work for most reasonable scenarios
-MaxNumPeople: 5
+MaxNumPeople: 1
 
 ## Pre-recorded Sequence Camera Calibration
 ## Used for MuPoTS-3D Test seq from ts6-ts20
