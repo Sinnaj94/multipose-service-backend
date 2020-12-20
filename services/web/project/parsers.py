@@ -5,8 +5,10 @@ from flask_restplus import reqparse
 import werkzeug
 
 post_job_parser = reqparse.RequestParser()
-post_job_parser.add_argument('name', default="My Job", type=str, location='form')
+post_job_parser.add_argument('name', default="My Project", type=str, location='form')
 post_job_parser.add_argument('tags', type=str, location='form', action='append', default=[])
+post_job_parser.add_argument('video', type=werkzeug.datastructures.FileStorage,
+                             location='files', required=False, help='Video file in mp4 format')
 
 get_jobs_parser = reqparse.RequestParser()
 get_jobs_parser.add_argument('result_code', required=False, type=int, choices=[-1, 0, 1])

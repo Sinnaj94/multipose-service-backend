@@ -27,7 +27,7 @@ class Users(db.Model):
     id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
     username = db.Column(db.String(32), index=True)
     password_hash = db.Column(db.String(128))
-    registration_date = db.Column(db.TIMESTAMP, nullable=False, default=datetime.now())
+    registration_date = db.Column(db.TIMESTAMP, nullable=False, default=datetime.utcnow)
     user_metadata = relationship("UserMetadata", backref="users")
     posts = relationship("Posts", backref="users", lazy='dynamic', cascade="all, delete-orphan")
     job = relationship("Jobs", backref="users", lazy='dynamic', cascade="all, delete-orphan")
@@ -99,7 +99,7 @@ class Posts(db.Model):
     user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
     result_id = db.Column(UUID(as_uuid=True), ForeignKey('results.id'))
     public = db.Column(db.BOOLEAN, default=True)
-    date = db.Column(db.TIMESTAMP, nullable=False, default=datetime.now())
+    date = db.Column(db.TIMESTAMP, nullable=False, default=datetime.utcnow)
     title = db.Column(db.String(64), nullable=False)
 
 
@@ -115,7 +115,7 @@ class Jobs(db.Model):
     video_uploaded = db.Column(db.Boolean, default=False)
     public = db.Column(db.Boolean, default=False, nullable=False)
     # Date updated
-    date_updated = db.Column(db.TIMESTAMP, default=datetime.now())
+    date_updated = db.Column(db.TIMESTAMP, default=datetime.utcnow)
 
 
 # TODO: Change Result DIR
@@ -125,7 +125,7 @@ class Results(db.Model):
     user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
     result_code = db.Column(db.Enum(ResultCode), nullable=False, default=ResultCode.default)
     max_people = db.Column(db.Integer, default=0)
-    date = db.Column(db.TIMESTAMP, default=datetime.now(), nullable=False)
+    date = db.Column(db.TIMESTAMP, default=datetime.utcnow, nullable=False)
 
 
 """
@@ -389,7 +389,7 @@ def get_job_stats(user_id):
         Results.result_code == ResultCode(-1)).count()
     num_pending = jobs.join(Results, Jobs.result).filter(
             Results.result_code == ResultCode(2)).count()
-    num_pending = jobs.join(Results, Jobs.result).filter(
+    num_pending += jobs.join(Results, Jobs.result).filter(
         Results.result_code == ResultCode(0)).count()
     num_success = jobs.join(Results, Jobs.result).filter(
         Results.result_code == ResultCode(1)).count()

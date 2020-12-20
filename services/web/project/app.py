@@ -269,7 +269,7 @@ class Token(Resource):
 """
 Jobs Space
 """
-jobs_space = api.namespace('jobs', description='Jobs')
+jobs_space = api.namespace('jobs', description='Manage Jobs of a user')
 
 
 class JobDoesNotExist(HTTPException):
@@ -324,6 +324,15 @@ class Jobs(Resource):
         args = parsers.post_job_parser.parse_args()
         print(args)
         job = model.add_job(**{"user_id": g.user.id, "name": args['name'], "tags": args['tags']})
+        # check if video is there
+        # check if the sent file is actually a video.
+        if args['video'] is not None and args['video'].mimetype == 'video/mp4':
+            with Connection(conn):
+                q = Queue()
+                q.enqueue(convert_xnect, job_id=str(job.id), video=args['video'].read())
+                job.video_uploaded = True
+                model.db.session.commit()
+                return job
         return job
 
 
