@@ -87,7 +87,6 @@ All methods are descripted using a swagger documentation.
 
 The Methods are also listed in the wiki.
 ## References
-- [video2bvh](https://github.com/KevinLTT/video2bvh) by KevinLTT
-- [openpose](https://github.com/CMU-Perceptual-Computing-Lab/openpose) by CMU-Perceptual-Computing-Lab
-- [openpose Docker image](https://hub.docker.com/r/cwaffles/openpose) by cwaffles
-- [XNECT](https://gvv.mpi-inf.mpg.de/projects/XNect/) by Mehta et al.
+- [video2bvh](https://github.com/KevinLTT/video2bvh) by KevinLTT - MIT License
+- [BVHSmooth](https://github.com/vdbalbom/BVHsmooth) by Virgínia Balbo - MIT License
+- [XNECT](https://gvv.mpi-inf.mpg.de/projects/XNect/) by Mehta et al. - ONLY FOR COMMERCIAL PURPOSES
