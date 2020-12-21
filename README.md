@@ -2,6 +2,9 @@
 This is an API which is using xnect to
 calculate dynamic pose data. Input data is a rgb video. It can process
 multiple people.
+## License
+The XNECT-Files are not included in this repository, because their license forbids it.
+You have to manually request them from [their page](https://gvv.mpi-inf.mpg.de/projects/XNect/).
 ## About the app
 The app is available in my other repository, [multipose-service-app](https://github.com/Sinnaj94/multipose-service-app).
 ### Screenshots
@@ -12,7 +15,18 @@ You need a graphics card with CUDA-Support for the calculations.
 ## Requisites
 This repository has been fully tested on [Ubuntu 20.04](https://releases.ubuntu.com/20.04/).
 It might also work on other Environments, but you may need different installation steps to make it run.
+### Request XNECT download
+:warning: XNECT's license doesn't permit commercial usage:
+```
+Permission is hereby granted, free of charge, to any person or company obtaining a copy of this software and associated documentation files (the "Software") from the copyright holders to use the Software for any non-commercial purpose. Publication, redistribution and (re)selling of the software, of modifications, extensions, and derivates of it, and of other software containing portions of the licensed Software, are not permitted. The Copyright holder is permitted to publically disclose and advertise the use of the software by any licensee.
 
+Packaging or distributing parts or whole of the provided software (including code, models and data) as is or as part of other software is prohibited. Commercial use of parts or whole of the provided software (including code, models and data) is strictly prohibited. Using the provided software for promotion of a commercial entity or product, or in any other manner which directly or indirectly results in commercial gains is strictly prohibited.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+However, in this repository the source code is automatically built. For that, please put the downloaded XNECT-Source code into ```services/xnect/xnect_library```.
+
+Please refrain from using the Software commercially, if you use XNECT or create a fork and use another multiperson-Framework.
 ### Installing the NVIDIA driver
 First of all, you should install an NVIDIA driver with support for CUDA >10.0.
 It is recommended to get the newest driver from the [NVIDIA site](https://www.nvidia.de/Download/index.aspx) and install it.
@@ -76,3 +90,4 @@ The Methods are also listed in the wiki.
 - [video2bvh](https://github.com/KevinLTT/video2bvh) by KevinLTT
 - [openpose](https://github.com/CMU-Perceptual-Computing-Lab/openpose) by CMU-Perceptual-Computing-Lab
 - [openpose Docker image](https://hub.docker.com/r/cwaffles/openpose) by cwaffles
+- [XNECT](https://gvv.mpi-inf.mpg.de/projects/XNect/) by Mehta et al.
