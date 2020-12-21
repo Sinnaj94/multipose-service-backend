@@ -62,7 +62,9 @@ class BookmarkedByCurrentUser(Raw):
                 return True
         return False
 
-
+"""
+MARSHALLING : Definition of custom Marshallers
+"""
 stage_marshal = api.model('Stage', {
     'progress' : fields.Float(),
     'name': fields.String()
@@ -119,7 +121,6 @@ delete_bookmark_marshal = api.model('Bookmarks', {
 
 
 jobs_marshal = api.model('Job', {
-    # TODO: Show user name
     'id': fields.String,
     'user': fields.Nested(light_user_marshal),
     'name': fields.String,
@@ -135,13 +136,30 @@ jobs_marshal = api.model('Job', {
     'result': fields.Nested(results_marshal),
 })
 
-# queue building
+statistics_marshal = api.model('JobStatistics', {
+    'success' : fields.Integer,
+    'pending' : fields.Integer,
+    'failed' : fields.Integer
+})
+
+# validate a min length of a http attribute
+def min_length(min_length):
+    def validate(s):
+        if len(s) >= min_length:
+            return s
+        raise ValidationError("Not long enough")
+    return validate
+
+"""
+Configuration
+"""
+# establish redis connection
 conn = redis.from_url(app.config["REDIS_URL"])
 
 # import
 import project.model.model as model
 
-# redirect
+# redirect to api/v1 (can be deleted if web service is built in future)
 @app.route("/")
 def redirect_to_api():
     return redirect("/api/v1")
@@ -151,11 +169,13 @@ Status
 """
 status_space = api.namespace('status', description='Get the version status of the api', blueprint=blueprint)
 
-
+"""
+api/v1/status : Returns status information about this api, such as version, description, etc.
+"""
 @status_space.route("/")
 class Status(Resource):
     def get(self):
-        # REDIS TEST
+        '''Get information about this API'''
         return {
             'version': api.version,
             'title': api.title,
@@ -167,16 +187,7 @@ class Status(Resource):
 USER MANAGEMENT
 """
 
-user_space = api.namespace('users', description='Users management')
-
-
-def min_length(min_length):
-    def validate(s):
-        if len(s) >= min_length:
-            return s
-        raise ValidationError("Not long enough")
-    return validate
-
+user_space = api.namespace('users', description='User management')
 
 user_parser = api.parser()
 user_parser.add_argument('username', type=min_length(5), required=True, location='form')
@@ -194,12 +205,14 @@ class Users(Resource):
     @api.response(200, 'User successfully created')
     @user_space.marshal_with(user_marshal)
     def post(self):
+        '''Register a new user'''
         args = user_parser.parse_args(strict=True)
         return model.add_user(args['username'], args['password'])
 
     @user_space.marshal_list_with(user_marshal)
     @api.response(200, 'Return users')
     def get(self):
+        '''Get all registered users'''
         return model.get_users()
 
 
@@ -210,6 +223,7 @@ class User(Resource):
     @api.response(200, 'Return user with given id')
     @user_space.marshal_with(user_marshal)
     def get(self, id):
+        '''Get user information by an id'''
         return model.get_user(id)
 
 
@@ -219,6 +233,7 @@ class UserMetadata(Resource):
     @user_space.marshal_with(user_metadata_marshal)
     @auth.login_required
     def put(self, id):
+        '''Put user metadata an id'''
         kwargs = user_metadata_parser.parse_args(strict=True)
         kwargs['user_id'] = g.user.id
         return model.update_metadata(**kwargs)
@@ -228,14 +243,8 @@ class UserMetadata(Resource):
 class Login(Resource):
     @auth.login_required
     def get(self):
+        ''' Perform a login for a user and get current data'''
         return g.user.serialize()
-
-
-"""
-Auth Space
-"""
-
-auth_space = api.namespace('auth', description="Authentication")
 
 
 # source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
@@ -253,12 +262,13 @@ def verify_password(username_or_token, password):
 
 
 # source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
-@auth_space.route("/token")
+@user_space.route("/token")
 class Token(Resource):
     @auth.login_required
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return token which is valid for 5184000 seconds')
     def get(self):
+        '''Get a token for a user that will last 60 days'''
         # duration in seconds
         duration = 5184000
         token = g.user.generate_auth_token(duration)
@@ -267,14 +277,20 @@ class Token(Resource):
                         'user': g.user.serialize()})
 
 """
-Jobs Space
+---
+--- JOBS SPACE ---
+---
 """
 jobs_space = api.namespace('jobs', description='Manage Jobs of a user')
+
+"""
+Exception when a Job doesn't exist
+"""
 
 
 class JobDoesNotExist(HTTPException):
     code = 404
-    description = "Job is pending"
+    description = "Job not found"
 
 
 def get_job_status(id):
@@ -298,76 +314,59 @@ def get_job_status(id):
         return {"stage": {"name": "pending"}, "finished": False}
 
 
+"""
+/api/v1/jobs : Get all jobs for users or post new Job
+"""
 @jobs_space.route("/")
 class Jobs(Resource):
-    """
-    Job status
-    """
-
     @auth.login_required
     @jobs_space.marshal_list_with(jobs_marshal)
     @api.expect(parsers.get_jobs_parser)
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return all jobs belonging to the authorized user')
     def get(self):
+        '''Get all jobs from the current user'''
+        # check parsers, retrieve jobs for user and return all jobs
         args = parsers.get_jobs_parser.parse_args()
         jobs = model.get_jobs_by_user_id(g.user.id, **args)
         return jobs
 
     @auth.login_required
     @api.expect(parsers.post_job_parser)
-    @api.doc('get_something')
     @jobs_space.marshal_with(jobs_marshal)
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return the new job')
     def post(self):
+        '''Post a new Job. The job will be added to the worker queue afterwards.'''
         args = parsers.post_job_parser.parse_args()
         print(args)
         job = model.add_job(**{"user_id": g.user.id, "name": args['name'], "tags": args['tags']})
         # check if video is there
         # check if the sent file is actually a video.
         if args['video'] is not None and args['video'].mimetype == 'video/mp4':
+            # enqueue the object to the worker queue
             with Connection(conn):
                 q = Queue()
                 q.enqueue(convert_xnect, my_job_id=job.id, video=args['video'].read())
                 job.video_uploaded = True
-                model.db.session.commit()
-                return job
+        model.db.session.commit()
         return job
 
 
-@jobs_space.route("/bookmarks")
-class Bookmarks(Resource):
-    @auth.login_required
-    @jobs_space.marshal_list_with(jobs_marshal)
-    @api.expect(parsers.posts_parser)
-    @api.response(401, 'The user is not permitted to do this action')
-    @api.response(200, 'Return all jobs belonging to the authorized user')
-    def get(self):
-        args = parsers.posts_parser.parse_args()
-        return model.get_bookmarks_by_user(g.user.id, args['tags[]'])
-
-@jobs_space.route("/bookmarks/<int:id>")
-class Bookmark(Resource):
-    @auth.login_required
-    def post(self, id):
-        return model.save_bookmark(id, g.user.id, None)
-
-    @auth.login_required
-    def delete(self, id):
-        return model.remove_bookmark(id, g.user.id, None)
-
-
-
+"""
+/api/v1/jobs/<int:id>/upload : Upload a video for a specific job and start it
+"""
 @jobs_space.route("/<int:id>/upload")
 class JobUploadVideo(Resource):
     @auth.login_required
     @api.expect(parsers.upload_parser)
     @jobs_space.marshal_with(jobs_marshal)
     @api.response(401, 'The user is not permitted to do this action')
-    @api.response(200, 'Return the new job')
+    @api.response(200, 'Return the job, video upload was successful')
+    @api.response(409, 'The video has been uploaded already')
     @api.response(404, 'Job not found')
     def put(self, id):
+        '''Upload a video for a specific job, it will automatically enqueue in the analysis'''
         args = parsers.upload_parser.parse_args()
         # check if the sent file is actually a video.
         if not args['video'].mimetype == 'video/mp4':
@@ -375,6 +374,7 @@ class JobUploadVideo(Resource):
         job = model.get_job_by_id(id)
         if job is None:
             abort(404)
+        # if the video has been uploaded already, it cannot be uploaded again
         elif job.video_uploaded is True:
             abort(409, "Video has been uploaded already")
         with Connection(conn):
@@ -384,11 +384,57 @@ class JobUploadVideo(Resource):
             model.db.session.commit()
             return job
 
+
+"""
+/api/v1/jobs/<int:id>/failed : Delete all failed jobs
+"""
 @jobs_space.route("/failed")
 class FailedJobs(Resource):
     @auth.login_required
+    @api.response(401, 'The user is not permitted to do this action')
+    @api.response(200, 'All failed jobs deleted')
     def delete(self):
+        '''Remove all failed bookmarks of a user'''
         return model.delete_failed_jobs(g.user.id)
+
+
+"""
+/api/v1/jobs/bookmarks : Retrieve all Bookmarked jobs for a user
+"""
+@jobs_space.route("/bookmarks")
+class Bookmarks(Resource):
+    @auth.login_required
+    @jobs_space.marshal_list_with(jobs_marshal)
+    @api.expect(parsers.posts_parser)
+    @api.response(401, 'The user is not permitted to do this action')
+    @api.response(200, 'Return all bookmarks saved by the authorized user')
+    def get(self):
+        '''Return all bookmarks saved by the authorized user'''
+        args = parsers.posts_parser.parse_args()
+        return model.get_bookmarks_by_user(g.user.id, args['tags[]'])
+
+
+"""
+/api/v1/jobs/bookmarks/<int:id> : Store specific job with given id  in own bookmarks collection or delete it
+"""
+@jobs_space.route("/bookmarks/<int:id>")
+class Bookmark(Resource):
+    @auth.login_required
+    @api.response(200, 'The user is not permitted to do this action')
+    @api.response(401, 'The user is not permitted to do this action')
+    @api.response(401, 'Job does not exist')
+    def post(self, id):
+        '''Store a job with a given id in own bookmarks'''
+        return model.save_bookmark(id, g.user.id, None)
+
+    @auth.login_required
+    @api.response(200, 'The user is not permitted to do this action')
+    @api.response(401, 'The user is not permitted to do this action')
+    @api.response(401, 'Job does not exist')
+    def delete(self, id):
+        ''''Delete a job with a given id from own bookmarks'''
+        return model.remove_bookmark(id, g.user.id, None)
+
 
 @jobs_space.route("/<int:id>")
 @api.response(401, 'The user is not permitted to do this action')
@@ -400,6 +446,7 @@ class Job(Resource):
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return the new job')
     def get(self, id):
+        '''Get a job by a given id'''
         job = model.get_job_by_id(id)
         if job is None:
             abort(404, "The resource was not found.")
@@ -410,6 +457,7 @@ class Job(Resource):
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return the new job')
     def delete(self, id):
+        '''Delete a job by a given id'''
         job = model.retrieve_job(id)
         if job.user_id != g.user.id:
             return 401
@@ -425,7 +473,6 @@ class JobStatus(Resource):
     """
     Job status
     """
-
     # get via id
     #@auth.login_required
     @jobs_space.marshal_with(status_marshal)
@@ -433,9 +480,8 @@ class JobStatus(Resource):
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return the new job')
     def get(self, id):
-        # TODO: Authentication
+        '''Get a Status for a Job by an id'''
         return get_job_status(id)
-
 
 
 @jobs_space.route("/<int:id>/source_video")
@@ -445,6 +491,7 @@ class JobSourceVideo(Resource):
     @api.response(200, 'Return video file')
     @api.response(404, 'Not found')
     def get(self, id):
+        '''Get the Source video for a Job by an id'''
         # check if job exists
         job = model.get_job_by_id(id)
         directory = os.path.join(Config.CACHE_DIR, str(job.id))
@@ -462,8 +509,12 @@ class JobThumbnail(Resource):
     @api.produces(["video/mp4"])
     @api.response(200, 'Return video file')
     def get(self, id):
+        '''Get a thumbnail for a Job by an id'''
         # check if job exists
         job = model.retrieve_job(id)
+        # check user
+        if(job.user_id != g.user.id):
+            raise
         directory = os.path.join(Config.CACHE_DIR, str(job.id))
         # check if result is succesful
         try:
@@ -475,10 +526,12 @@ class JobThumbnail(Resource):
 
 @jobs_space.route("/statistics")
 class JobStats(Resource):
+    @jobs_space.marshal_with(statistics_marshal)
     @auth.login_required
     @api.response(200, 'Return statistics about jobs')
     def get(self):
-        return jsonify(model.get_job_stats(g.user.id))
+        '''Get statistics for all jobs of a user - how many success, how many pending, how many failed'''
+        return model.get_job_stats(g.user.id)
 
 class ResultFailedException(HTTPException):
     code = 404
@@ -494,7 +547,7 @@ def start_job(job_id, **kwargs):
 Results Space
 """
 
-results_space = api.namespace('results', description='Results')
+results_space = api.namespace('results', description='Get Results for specific jobs')
 
 
 @results_space.route("/<int:id>")
@@ -505,6 +558,7 @@ class Result(Resource):
     @api.response(200, 'Return the new job')
     @api.response(401, 'The user is not permitted to do this action')
     def get(self, id):
+        '''get results for a job by id'''
         return model.get_result_by_id(id)
 
 
@@ -515,6 +569,7 @@ class Results(Resource):
     @api.response(200, 'Return all the results that match to the given parameters')
     @api.response(401, 'The user is not permitted to do this action')
     def get(self):
+        '''get results for all jobs by user'''
         return model.filter_results(g.user.id)
 
 
@@ -523,8 +578,9 @@ class ResultOutputVideo(Resource):
     @auth.login_required
     @api.produces(["video/mp4"])
     @api.response(200, 'Return video file')
+    @api.deprecated
     def get(self, id):
-        # TODO: Generalize this function
+        '''get result video for a job by id (visualization of joints) -- replaced by "results/{id}/render_html"'''
         result = model.get_result_by_id(id)
         if result is None:
             return 404
@@ -561,8 +617,9 @@ def serve_zip(job, result):
 class ResultBvhFile(Resource):
     @auth.login_required
     @api.produces(["application/octet-stream"])
-    @api.response(200, 'Return first bvh file')
+    @api.response(200, 'Return bvh files')
     def get(self, id):
+        '''Returns bvh-Files for a result as zip (or as .bvh, if only one person was tracked) for a job by id'''
         result = model.get_result_by_id(id)
         job = model.get_job_by_id(id)
         if result is None:
@@ -595,6 +652,7 @@ class ResultBvhFileForPerson(Resource):
     @api.response(200, 'Return bvh file')
     @api.expect(filter_parser)
     def get(self, id, person_id):
+        '''Returns bvh-Files by person index (counting from 0) for a job by id'''
         args = filter_parser.parse_args(strict=True)
         result = model.get_result_by_id(id)
         if result is None:
@@ -621,6 +679,7 @@ class ResultRenderHTML(Resource):
     @api.expect(parsers.render_parser)
     @api.expect(filter_parser)
     def get(self, id):
+        '''render interactive 3d scene for result with motion capturing data for a job by id'''
         args = filter_parser.parse_args(strict=True)
         headers = {'Content-Type' : 'text/html'}
         num_people = model.get_result_by_id(id).max_people
@@ -643,6 +702,7 @@ class ResultRenderHTML(Resource):
 class ResultRenderHTMLForPerson(Resource):
     @api.expect(filter_parser)
     def get(self, id, person_id):
+        '''render interactive 3d scene for specific person for result with motion capturing data for a job by id'''
         headers = {'Content-Type' : 'text/html'}
         args = filter_parser.parse_args(strict=True)
         url = [url_for('api.results_result_bvh_file_for_person', id=id, person_id=person_id, border=args['border'], u0=args['u0'])]
@@ -654,7 +714,9 @@ class ResultRenderHTMLForPerson(Resource):
 @results_space.route("/<int:id>/render_html_filtered")
 class ResultRenderHTMLFilteredDynamic(Resource):
     @api.expect(filter_parser)
+    @api.deprecated
     def get(self, id):
+        '''render interactive 3d scene for specific person for result with motion capturing data for a job by id - replaced by render_html'''
         args = filter_parser.parse_args(strict=True)
         headers = {'Content-Type' : 'text/html'}
         return make_response(render_template('bvh_import/index.html',
@@ -665,7 +727,9 @@ class ResultRenderHTMLFilteredDynamic(Resource):
 
 @results_space.route("/<int:id>/2d_data")
 class Result2DData(Resource):
+    @api.deprecated
     def get(self, id):
+        '''Deprecated'''
         result = model.get_result_by_id(id)
         if result is None:
             return 404
@@ -697,11 +761,12 @@ posts_space = api.namespace('posts', description='Posts feed')
 # return all public posts
 @posts_space.route("/")
 class Posts(Resource):
-    @api.response(200, 'Return the first 100 public posts')
+    @api.response(200, 'Return the public posts')
     @api.expect(parsers.posts_parser)
     @auth.login_required
     @jobs_space.marshal_list_with(jobs_marshal)
     def get(self):
+        '''Returns all public job-posts'''
         args = parsers.posts_parser.parse_args(strict=True)
         if args['tags[]'] is None:
             return model.get_all_public_posts()
@@ -713,12 +778,14 @@ class SinglePost(Resource):
     @auth.login_required
     @jobs_space.marshal_with(jobs_marshal)
     def post(self, id):
+        '''Post a job by given id'''
         return model.set_job_public(id, g.user.id)
 
     @auth.login_required
     @jobs_space.marshal_with(jobs_marshal)
     def delete(self, id):
+        '''delete a posted job by given ID'''
         return model.set_job_private(id, g.user.id)
 
-
+# initialize database
 model.db.init_app(app)

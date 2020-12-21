@@ -17,7 +17,7 @@ from project.app import app, ResultCode
 db = SQLAlchemy(app)
 
 """
-DATABASE MODEL
+DATABASE MODEL : In this file the database connects to PostreSQL and automatically creates the defined Tables
 """
 
 
@@ -118,7 +118,6 @@ class Jobs(db.Model):
     date_updated = db.Column(db.TIMESTAMP, default=datetime.utcnow)
 
 
-# TODO: Change Result DIR
 class Results(db.Model):
     __tablename_ = 'results'
     id = db.Column(db.Integer, ForeignKey('jobs.id'), primary_key=True)
@@ -129,10 +128,8 @@ class Results(db.Model):
 
 
 """
-EVENT LISTENERS
+EVENT LISTENERS : Triggers a specific event (eg. jobs inserted -> result insert)
 """
-
-
 @db.event.listens_for(Jobs, "after_insert")
 def create_result(mapper, connection, target):
     re = Results.__table__
@@ -145,9 +142,9 @@ def notify_observers(mapper, connection, target):
     # notify_analysis()
 
 
-"""methods"""
-
-
+"""
+EXCEPTIONS
+"""
 class JobDoesNotExist(HTTPException):
     code = 404
     description = "Job does not exist."
@@ -166,6 +163,7 @@ class PersonIDRequired(HTTPException):
 class Forbidden(HTTPException):
     code = 403
     description = "You are not allowed to do that."
+
 
 def retrieve_job(job_id):
     job = Jobs.query.get(job_id)
@@ -359,6 +357,8 @@ def save_bookmark(job_id, user_id, category):
     count = None
     if f is not None:
         count = len(f.bookmarks)
+    else:
+        raise JobDoesNotExist
     return {"count": count, "success": True}
 
 

@@ -59,11 +59,14 @@ The Server Settings can be accessed in file [config.py](services/web/project/con
 ## Running
 Running this repository is fairly easy. You just have to type `docker-compose build` to build the image and `docker-compose up`
 to run the application. Docker will take care of creating and managing the containers and installing all the requirements.
+If an error occurs, it is probably due to a wrong NVIDIA-CUDA-Docker configuration.
+Please refer to [docker-compose Extension](#docker-compose-Extension) to fix that error.
+## Working with the api
+If everything works, your API will be accessible at [127.0.0.1 (localhost)](127.0.0.1).
+All methods are descripted using a swagger documentation.
 
+The Methods are also listed in the wiki.
 ## References
 - [video2bvh](https://github.com/KevinLTT/video2bvh) by KevinLTT
 - [openpose](https://github.com/CMU-Perceptual-Computing-Lab/openpose) by CMU-Perceptual-Computing-Lab
 - [openpose Docker image](https://hub.docker.com/r/cwaffles/openpose) by cwaffles
-
-ad633635-0eb9-4a95-a74f-d7b251800601
-a6fc4d34-da86-491a-8786-8859d0c2188c

@@ -9,7 +9,7 @@ services:
       context: ./services/web
     command:
       bash -c "python3 manage.py create_db
-      && python3 manage.py run -h 0.0.0.0"
+      && gunicorn --bind 0.0.0.0:5000 manage:app"
     environment:
       - APP_SETTINGS=project.config.Config
     volumes:
@@ -76,8 +76,6 @@ services:
     tty: true
     expose:
       - 8081
-    ports:
-      - 8081:8081
 
   nginx:
     build: ./services/nginx
