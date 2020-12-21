@@ -39,7 +39,7 @@ def finished():
     return jsonify({"finished": app.config['FINISHED']})
 
 
-@app.route("/<uuid:id>", methods=['GET', 'POST'])
+@app.route("/<int:id>", methods=['GET', 'POST'])
 def analyse(id):
     if request.method == 'POST':
         print(request.files)
@@ -78,21 +78,21 @@ def get_file(id, filename):
     return send_from_directory(directory=folder, filename=filename)
 
 
-@app.route("/<uuid:id>/ik3d", methods=['GET'])
+@app.route("/<int:id>/ik3d", methods=['GET'])
 def get_ik3d(id):
     return get_file(id, "IK3D.txt")
 
 
-@app.route("/<uuid:id>/ik2d", methods=['GET'])
+@app.route("/<int:id>/ik2d", methods=['GET'])
 def get_ik2d(id):
     return get_file(id, "IK2D.txt")
 
 
-@app.route("/<uuid:id>/raw3d", methods=['GET'])
+@app.route("/<int:id>/raw3d", methods=['GET'])
 def get_raw3d(id):
     return get_file(id, "raw3D.txt")
 
 
-@app.route("/<uuid:id>/raw2d", methods=['GET'])
+@app.route("/<int:id>/raw2d", methods=['GET'])
 def get_raw2d(id):
     return get_file(id, "raw2D.txt")

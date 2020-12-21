@@ -141,7 +141,7 @@ def export_video_2d(keypoints_list, video_file, output_dir):
     cap.release()
 
 
-def prepare(video):
+def prepare(my_job_id, video):
     from project.model import model
     job = get_current_job()
 
@@ -149,7 +149,7 @@ def prepare(video):
 
     job_id = str(get_current_job().get_id())
     # add to database
-    job_cache_dir = Path(os.path.join(Config.CACHE_DIR, job_id))
+    job_cache_dir = Path(os.path.join(Config.CACHE_DIR, str(my_job_id)))
 
     # The cache dir will look like that : cache/aabb-ccc-dddd-fff-ggg/ (UUID)
     # Create a directory where the cache is stored.
@@ -174,7 +174,7 @@ def prepare(video):
     fps = videogen.inputfps
 
     # result
-    result = model.get_result_by_id(get_current_job().get_id())
+    result = model.get_result_by_id(my_job_id)
     result.result_code = model.ResultCode.pending
     model.db.session.commit()
 
@@ -316,12 +316,12 @@ def interpolate_poses(pred, start, end):
     print("Found one", start_data)
 
 
-def convert_xnect(video):
-    job, job_id, model, job_cache_dir, pose2d_file, pose3d_file, thumbnail_path, filename, result, result_cache_dir,\
-    fps = prepare(video)
+def convert_xnect(my_job_id, video):
+    job, job_id, model, job_cache_dir, pose2d_file, pose3d_file, thumbnail_path, filename, result, result_cache_dir, \
+    fps = prepare(my_job_id, video)
     job.meta['stage'] = {'name': 'xnect', 'progress': None}
 
-    paths = analyse_xnect(video, job_id, result_cache_dir, result, model)
+    paths = analyse_xnect(video, str(my_job_id), result_cache_dir, result, model)
     if paths is False:
         return False
     raw2d, raw3d, ik3d = paths["raw2d"], paths["raw3d"], paths["ik3d"]

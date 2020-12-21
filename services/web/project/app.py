@@ -92,7 +92,7 @@ user_marshal = api.model('User', {
     'user_metadata': fields.Nested(user_metadata_marshal)
 })
 results_marshal = api.model('Result', {
-    'id': fields.String,
+    'id': fields.Integer,
     'max_people': fields.Integer,
     'result_code': fields.Integer(description="Result Code - Success: 1; Failure: 0; Pending: -1"),
     'date': fields.DateTime(dt_format='iso8601'),
@@ -204,7 +204,7 @@ class Users(Resource):
 
 
 # source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
-@user_space.route("/<uuid:id>")
+@user_space.route("/<int:id>")
 class User(Resource):
     @api.response(404, 'The user with given id does not exist')
     @api.response(200, 'Return user with given id')
@@ -213,7 +213,7 @@ class User(Resource):
         return model.get_user(id)
 
 
-@user_space.route("/<uuid:id>/metadata")
+@user_space.route("/<int:id>/metadata")
 class UserMetadata(Resource):
     @api.expect(user_metadata_parser)
     @user_space.marshal_with(user_metadata_marshal)
@@ -329,7 +329,7 @@ class Jobs(Resource):
         if args['video'] is not None and args['video'].mimetype == 'video/mp4':
             with Connection(conn):
                 q = Queue()
-                q.enqueue(convert_xnect, job_id=str(job.id), video=args['video'].read())
+                q.enqueue(convert_xnect, my_job_id=job.id, video=args['video'].read())
                 job.video_uploaded = True
                 model.db.session.commit()
                 return job
@@ -347,7 +347,7 @@ class Bookmarks(Resource):
         args = parsers.posts_parser.parse_args()
         return model.get_bookmarks_by_user(g.user.id, args['tags[]'])
 
-@jobs_space.route("/bookmarks/<uuid:id>")
+@jobs_space.route("/bookmarks/<int:id>")
 class Bookmark(Resource):
     @auth.login_required
     def post(self, id):
@@ -359,7 +359,7 @@ class Bookmark(Resource):
 
 
 
-@jobs_space.route("/<uuid:id>/upload")
+@jobs_space.route("/<int:id>/upload")
 class JobUploadVideo(Resource):
     @auth.login_required
     @api.expect(parsers.upload_parser)
@@ -390,7 +390,7 @@ class FailedJobs(Resource):
     def delete(self):
         return model.delete_failed_jobs(g.user.id)
 
-@jobs_space.route("/<uuid:id>")
+@jobs_space.route("/<int:id>")
 @api.response(401, 'The user is not permitted to do this action')
 class Job(Resource):
     # get via id
@@ -419,7 +419,7 @@ class Job(Resource):
 
 
 
-@jobs_space.route("/<uuid:id>/status")
+@jobs_space.route("/<int:id>/status")
 @api.response(401, 'The user is not permitted to do this action')
 class JobStatus(Resource):
     """
@@ -438,7 +438,7 @@ class JobStatus(Resource):
 
 
 
-@jobs_space.route("/<uuid:id>/source_video")
+@jobs_space.route("/<int:id>/source_video")
 class JobSourceVideo(Resource):
     #@auth.login_required
     @api.produces(["video/mp4"])
@@ -456,7 +456,7 @@ class JobSourceVideo(Resource):
             abort(404)
 
 
-@jobs_space.route("/<uuid:id>/thumbnail")
+@jobs_space.route("/<int:id>/thumbnail")
 class JobThumbnail(Resource):
     @auth.login_required
     @api.produces(["video/mp4"])
@@ -497,7 +497,7 @@ Results Space
 results_space = api.namespace('results', description='Results')
 
 
-@results_space.route("/<uuid:id>")
+@results_space.route("/<int:id>")
 class Result(Resource):
     @auth.login_required
     @results_space.marshal_with(results_marshal)
@@ -518,7 +518,7 @@ class Results(Resource):
         return model.filter_results(g.user.id)
 
 
-@results_space.route("/<uuid:id>/output_video")
+@results_space.route("/<int:id>/output_video")
 class ResultOutputVideo(Resource):
     @auth.login_required
     @api.produces(["video/mp4"])
@@ -557,7 +557,7 @@ def serve_zip(job, result):
                                mimetype="application/zip")
 
 
-@results_space.route("/<uuid:id>/bvh")
+@results_space.route("/<int:id>/bvh")
 class ResultBvhFile(Resource):
     @auth.login_required
     @api.produces(["application/octet-stream"])
@@ -589,7 +589,7 @@ def filter_bvh(id, border, u0, nr):
     #pos_butterworth(output, output, border, u0)
 
 
-@results_space.route("/<uuid:id>/bvh/<int:person_id>")
+@results_space.route("/<int:id>/bvh/<int:person_id>")
 class ResultBvhFileForPerson(Resource):
     @api.produces(["application/octet-stream"])
     @api.response(200, 'Return bvh file')
@@ -616,7 +616,7 @@ class ResultBvhFileForPerson(Resource):
                                    mimetype="application/octet-stream")
 
 
-@results_space.route("/<uuid:id>/render_html")
+@results_space.route("/<int:id>/render_html")
 class ResultRenderHTML(Resource):
     @api.expect(parsers.render_parser)
     @api.expect(filter_parser)
@@ -639,7 +639,7 @@ class ResultRenderHTML(Resource):
         #return redirect(url_for("api.results_result_render_html_for_person", id=id, person_id=1), 303)
 
 
-@results_space.route("/<uuid:id>/render_html/<int:person_id>")
+@results_space.route("/<int:id>/render_html/<int:person_id>")
 class ResultRenderHTMLForPerson(Resource):
     @api.expect(filter_parser)
     def get(self, id, person_id):
@@ -651,7 +651,7 @@ class ResultRenderHTMLForPerson(Resource):
                                              ), 200, headers)
 
 
-@results_space.route("/<uuid:id>/render_html_filtered")
+@results_space.route("/<int:id>/render_html_filtered")
 class ResultRenderHTMLFilteredDynamic(Resource):
     @api.expect(filter_parser)
     def get(self, id):
@@ -663,7 +663,7 @@ class ResultRenderHTMLFilteredDynamic(Resource):
                                                 200, headers)
 
 
-@results_space.route("/<uuid:id>/2d_data")
+@results_space.route("/<int:id>/2d_data")
 class Result2DData(Resource):
     def get(self, id):
         result = model.get_result_by_id(id)
@@ -708,7 +708,7 @@ class Posts(Resource):
         return model.get_public_posts_filtered_by_tags(args['tags[]'])
 
 
-@posts_space.route("/<uuid:id>")
+@posts_space.route("/<int:id>")
 class SinglePost(Resource):
     @auth.login_required
     @jobs_space.marshal_with(jobs_marshal)

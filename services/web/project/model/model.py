@@ -24,7 +24,7 @@ DATABASE MODEL
 # source: https://github.com/miguelgrinberg/REST-auth/blob/master/api.py (modified)
 class Users(db.Model):
     __tablename__ = 'users'
-    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
+    id = db.Column(db.Integer, primary_key=True, unique=True, nullable=False)
     username = db.Column(db.String(32), index=True)
     password_hash = db.Column(db.String(128))
     registration_date = db.Column(db.TIMESTAMP, nullable=False, default=datetime.utcnow)
@@ -41,7 +41,7 @@ class Users(db.Model):
 
     def generate_auth_token(self, expires_in=600):
         return jwt.encode(
-            {'id': self.id.hex, 'exp': time.time() + expires_in},
+            {'id': self.id, 'exp': time.time() + expires_in},
             app.config['SECRET_KEY'], algorithm='HS256')
 
     @staticmethod
@@ -62,7 +62,7 @@ class Users(db.Model):
 
 class UserMetadata(db.Model):
     __tablename__ = 'user_metadata'
-    user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'), primary_key=True)
+    user_id = db.Column(db.Integer, ForeignKey('users.id'), primary_key=True)
     prename = db.Column(db.String, nullable=True)
     surname = db.Column(db.String, nullable=True)
     website = db.Column(db.String, nullable=True)
@@ -71,33 +71,33 @@ class UserMetadata(db.Model):
 
 JobTag = db.Table(
     'JobTag', db.Model.metadata,
-    db.Column('tagID', UUID(as_uuid=True), ForeignKey('tags.id', ondelete="CASCADE")),
-    db.Column('jobID', UUID(as_uuid=True), ForeignKey('jobs.id', ondelete="CASCADE"))
+    db.Column('tagID', db.Integer, ForeignKey('tags.id', ondelete="CASCADE")),
+    db.Column('jobID', db.Integer, ForeignKey('jobs.id', ondelete="CASCADE"))
 )
 
 
 class Bookmarks(db.Model):
     __tablename__ = 'bookmarks'
-    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
+    id = db.Column(db.Integer, primary_key=True, unique=True, nullable=False)
     category = db.Column(db.String, default="Bookmarks")
-    user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id', ondelete="CASCADE"))
+    user_id = db.Column(db.Integer, ForeignKey('users.id', ondelete="CASCADE"))
     user = relationship("Users", backref="bookmarks")
-    job_id = db.Column(UUID(as_uuid=True), ForeignKey('jobs.id', ondelete="CASCADE"))
+    job_id = db.Column(db.Integer, ForeignKey('jobs.id', ondelete="CASCADE"))
     job = relationship("Jobs", backref="bookmarks")
 
 
 class Tags(db.Model):
     __tablename__ = 'tags'
-    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
+    id = db.Column(db.Integer, primary_key=True, unique=True, nullable=False)
     text = db.Column(db.String, nullable=False)
     jobs = relationship('Jobs', secondary=JobTag, back_populates='tags')
 
 
 class Posts(db.Model):
     __tablename__ = 'posts'
-    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
-    user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
-    result_id = db.Column(UUID(as_uuid=True), ForeignKey('results.id'))
+    id = db.Column(db.Integer, primary_key=True, unique=True, nullable=False)
+    user_id = db.Column(db.Integer, ForeignKey('users.id'))
+    result_id = db.Column(db.Integer, ForeignKey('results.id'))
     public = db.Column(db.BOOLEAN, default=True)
     date = db.Column(db.TIMESTAMP, nullable=False, default=datetime.utcnow)
     title = db.Column(db.String(64), nullable=False)
@@ -106,11 +106,11 @@ class Posts(db.Model):
 # parent
 class Jobs(db.Model):
     __tablename_ = 'jobs'
-    id = db.Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
+    id = db.Column(db.Integer, primary_key=True, unique=True, nullable=False)
     result = relationship("Results", backref="jobs", uselist=False)
     name = db.Column(db.String, nullable=False)
     tags = relationship('Tags', secondary=JobTag, back_populates='jobs')
-    user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    user_id = db.Column(db.Integer, ForeignKey('users.id'))
     user = relationship("Users", backref="jobs")
     video_uploaded = db.Column(db.Boolean, default=False)
     public = db.Column(db.Boolean, default=False, nullable=False)
@@ -121,8 +121,8 @@ class Jobs(db.Model):
 # TODO: Change Result DIR
 class Results(db.Model):
     __tablename_ = 'results'
-    id = db.Column(UUID(as_uuid=True), ForeignKey('jobs.id'), primary_key=True)
-    user_id = db.Column(UUID(as_uuid=True), ForeignKey('users.id'))
+    id = db.Column(db.Integer, ForeignKey('jobs.id'), primary_key=True)
+    user_id = db.Column(db.Integer, ForeignKey('users.id'))
     result_code = db.Column(db.Enum(ResultCode), nullable=False, default=ResultCode.default)
     max_people = db.Column(db.Integer, default=0)
     date = db.Column(db.TIMESTAMP, default=datetime.utcnow, nullable=False)
