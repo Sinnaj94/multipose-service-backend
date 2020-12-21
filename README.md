@@ -1,6 +1,12 @@
 # Motion Capturing API from Single RGB Videos
-This is an API which is using openpose and 3d-pose-baseline to
-calculate dynamic pose data. Input data is a rgb video.
+This is an API which is using xnect to
+calculate dynamic pose data. Input data is a rgb video. It can process
+multiple people.
+## About the app
+The app is available in my other repository, [multipose-service-app](https://github.com/Sinnaj94/multipose-service-app).
+### Screenshots
+The Android App in Action looks like this:
+![](screenshots/screenshots.png)
 ## Hardware
 You need a graphics card with CUDA-Support for the calculations.
 ## Requisites
