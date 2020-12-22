@@ -5,6 +5,7 @@ multiple people.
 ## License
 The XNECT-Files are not included in this repository, because their license forbids it.
 You have to manually request them from [their page](https://gvv.mpi-inf.mpg.de/projects/XNect/).
+The rest of the software is under the MIT license.
 ## About the app
 The app is available in my other repository, [multipose-service-app](https://github.com/Sinnaj94/multipose-service-app).
 ### Screenshots
