@@ -72,15 +72,18 @@ From [.env.dev](.env.dev):
 ```
 SECRET_KEY=CHANGE_THIS_KEY
 ```
-
 ### App Settings
-The Server Settings can be accessed in file [config.py](services/web/project/config.py).
-
+The Server Settings can be accessed in file [services/web/project/config.py](services/web/project/config.py).
+The Reverse Proxy can be configured using file [services/nginx/nginx.conf](services/nginx/nginx.conf)
 ## Running
-Running this repository is fairly easy. You just have to type `docker-compose build` to build the image and `docker-compose up`
+Running this project is fairly easy. You just have to type `docker-compose build` to build the image and `docker-compose up`
 to run the application. Docker will take care of creating and managing the containers and installing all the requirements.
 If an error occurs, it is probably due to a wrong NVIDIA-CUDA-Docker configuration.
 Please refer to [docker-compose Extension](#docker-compose-Extension) to fix that error.
+The debugged Server can be accessed via `localhost:80`
+### Debug Mode
+If you want to run the project in debug mode you have to type `docker-compose -f docker-compose-dev.yml`.
+The flask server can be accessed via `localhost:5000`
 ## Working with the api
 If everything works, your API will be accessible at [127.0.0.1 (localhost)](127.0.0.1).
 All methods are descripted using a swagger documentation.
@@ -89,4 +92,4 @@ The Methods are also listed in the wiki.
 ## References
 - [video2bvh](https://github.com/KevinLTT/video2bvh) by KevinLTT - MIT License
 - [BVHSmooth](https://github.com/vdbalbom/BVHsmooth) by Virgínia Balbo - MIT License
-- [XNECT](https://gvv.mpi-inf.mpg.de/projects/XNect/) by Mehta et al. - ONLY FOR COMMERCIAL PURPOSES
+- [XNECT](https://gvv.mpi-inf.mpg.de/projects/XNect/) by Mehta et al. (Source files not included in this repository) - ONLY FOR NON-COMMERCIAL PURPOSES

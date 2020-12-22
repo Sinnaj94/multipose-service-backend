@@ -140,11 +140,11 @@ void analyseVideo(std::string &videoFilePath, XNECT &xnect)
         }
         index++;
         xnect.processImg(frame);
-        xnect.sendDataToUnity();
-        drawPeople(frame, xnect);
-        namedWindow("main", WINDOW_NORMAL);
-        imshow("main", frame);
-        waitKey(1);
+        //xnect.sendDataToUnity();
+        //drawPeople(frame, xnect);
+        //namedWindow("main", WINDOW_NORMAL);
+        //imshow("main", frame);
+        //waitKey(1);
     }
     cap.release();
 

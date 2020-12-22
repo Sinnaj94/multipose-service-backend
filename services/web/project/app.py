@@ -379,7 +379,7 @@ class JobUploadVideo(Resource):
             abort(409, "Video has been uploaded already")
         with Connection(conn):
             q = Queue()
-            q.enqueue(convert_xnect, job_id=str(job.id), video=args['video'].read())
+            q.enqueue(convert_xnect, my_job_id=job.id, video=args['video'].read())
             job.video_uploaded = True
             model.db.session.commit()
             return job

@@ -12,7 +12,7 @@ services:
     command:
       # creates a database and binds the web service to gunicorn
       bash -c "python3 manage.py create_db
-      && gunicorn --bind 0.0.0.0:5000 manage:app"
+      && python3 manage.py run -h 0.0.0.0"
     environment:
       # configuration file
       - APP_SETTINGS=project.config.Config
@@ -21,8 +21,8 @@ services:
       - ./services/web/:/usr/src/app/
       - file-cache:/usr/data/
     # expose a port to OTHER DOCKER CONTAINERS ONLY
-    expose:
-      - 5000
+    ports:
+      - 5000:5000
     # environment configuration
     env_file:
       - ./.env.dev
@@ -60,8 +60,8 @@ services:
       - POSTGRES_USER=user
       - POSTGRES_PASSWORD=CHANGE_THIS_TO_A_STRONG_PASSWORD
       - POSTGRES_DB=mocap
-    expose:
-      - 5432
+    ports:
+      - 5432:5432
 
   xnect:
     container_name: xnect
@@ -82,8 +82,8 @@ services:
     command: flask run --host=0.0.0.0 --port=8081
     stdin_open: true
     tty: true
-    expose:
-      - 8081
+    ports:
+      - 8081:8081
 
   nginx:
     build: ./services/nginx
