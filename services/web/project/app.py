@@ -1,4 +1,5 @@
 #!flask/bin/python
+import base64
 import enum
 import io
 import os
@@ -11,7 +12,7 @@ from flask_restplus.fields import Raw
 from rq.job import Job as RedisJob
 from rq.exceptions import NoSuchJobError
 from flask import Flask, Blueprint, g, jsonify, send_from_directory, url_for, make_response, render_template, redirect, \
-    send_file
+    send_file, request
 from flask_restplus import Api, Resource, abort, fields, ValidationError
 from werkzeug.exceptions import HTTPException, NotFound, BadRequest
 from project import parsers
@@ -182,6 +183,27 @@ class Status(Resource):
             'description': api.description,
             'id': 'motion_capturing_api'
         }
+
+
+class NotAuthorized(HTTPException):
+    code = 401
+    description = "You are not authorized to do that"
+
+
+def check_auth(job, autho):
+    password = auth.get_auth_password(autho)
+    user = auth.authenticate(autho, password)
+    auth.auth_error_callback(403)
+    if job.public:
+        return
+    if autho is None:
+        raise NotAuthorized
+    if not user:
+        print("No login")
+        raise NotAuthorized
+    if g.user.id == job.user.id:
+        return
+    raise NotAuthorized
 
 """
 USER MANAGEMENT
@@ -372,6 +394,7 @@ class JobUploadVideo(Resource):
         if not args['video'].mimetype == 'video/mp4':
             abort(415)
         job = model.get_job_by_id(id)
+        check_auth(job, auth.get_auth())
         if job is None:
             abort(404)
         # if the video has been uploaded already, it cannot be uploaded again
@@ -448,6 +471,7 @@ class Job(Resource):
     def get(self, id):
         '''Get a job by a given id'''
         job = model.get_job_by_id(id)
+        check_auth(job, auth.get_auth())
         if job is None:
             abort(404, "The resource was not found.")
         return job
@@ -459,8 +483,7 @@ class Job(Resource):
     def delete(self, id):
         '''Delete a job by a given id'''
         job = model.retrieve_job(id)
-        if job.user_id != g.user.id:
-            return 401
+        check_auth(job, auth.get_auth())
         if model.get_result_by_id(job.id).result_code == ResultCode.pending:
             return 400
         return model.delete_job(job.id)
@@ -481,6 +504,7 @@ class JobStatus(Resource):
     @api.response(200, 'Return the new job')
     def get(self, id):
         '''Get a Status for a Job by an id'''
+        check_auth(model.get_job_by_id(id), auth.get_auth())
         return get_job_status(id)
 
 
@@ -494,6 +518,7 @@ class JobSourceVideo(Resource):
         '''Get the Source video for a Job by an id'''
         # check if job exists
         job = model.get_job_by_id(id)
+        check_auth(job, auth.get_auth())
         directory = os.path.join(Config.CACHE_DIR, str(job.id))
         # check if result is succesful
         try:
@@ -513,8 +538,7 @@ class JobThumbnail(Resource):
         # check if job exists
         job = model.retrieve_job(id)
         # check user
-        if(job.user_id != g.user.id):
-            raise
+        check_auth(job, auth.get_auth())
         directory = os.path.join(Config.CACHE_DIR, str(job.id))
         # check if result is succesful
         try:
@@ -559,6 +583,7 @@ class Result(Resource):
     @api.response(401, 'The user is not permitted to do this action')
     def get(self, id):
         '''get results for a job by id'''
+        check_auth(model.get_job_by_id(id), auth.get_auth())
         return model.get_result_by_id(id)
 
 
@@ -581,6 +606,7 @@ class ResultOutputVideo(Resource):
     @api.deprecated
     def get(self, id):
         '''get result video for a job by id (visualization of joints) -- replaced by "results/{id}/render_html"'''
+        check_auth(model.get_job_by_id(id), auth.get_auth())
         result = model.get_result_by_id(id)
         if result is None:
             return 404
@@ -615,7 +641,6 @@ def serve_zip(job, result):
 
 @results_space.route("/<int:id>/bvh")
 class ResultBvhFile(Resource):
-    @auth.login_required
     @api.produces(["application/octet-stream"])
     @api.response(200, 'Return bvh files')
     def get(self, id):
@@ -676,7 +701,6 @@ class ResultBvhFileForPerson(Resource):
 
 @results_space.route("/<int:id>/render_html")
 class ResultRenderHTML(Resource):
-    @api.expect(parsers.render_parser)
     @api.expect(filter_parser)
     def get(self, id):
         '''render interactive 3d scene for result with motion capturing data for a job by id'''
@@ -694,6 +718,7 @@ class ResultRenderHTML(Resource):
                                     border=args['border'], u0=args['u0']))
                 print(urls)
         return make_response(render_template('bvh_import/index.html',
+                                             title=model.get_job_by_id(id).name,
                                              url_array=urls), 200, headers)
         #return redirect(url_for("api.results_result_render_html_for_person", id=id, person_id=1), 303)
 
@@ -707,7 +732,8 @@ class ResultRenderHTMLForPerson(Resource):
         args = filter_parser.parse_args(strict=True)
         url = [url_for('api.results_result_bvh_file_for_person', id=id, person_id=person_id, border=args['border'], u0=args['u0'])]
         return make_response(render_template('bvh_import/index.html',
-                                             url_array=url
+                                             url_array=url,
+                                             title=model.get_job_by_id(id).name
                                              ), 200, headers)
 
 
@@ -719,10 +745,7 @@ class ResultRenderHTMLFilteredDynamic(Resource):
         '''render interactive 3d scene for specific person for result with motion capturing data for a job by id - replaced by render_html'''
         args = filter_parser.parse_args(strict=True)
         headers = {'Content-Type' : 'text/html'}
-        return make_response(render_template('bvh_import/index.html',
-                                             current_url=url_for('api.results_result_bvh_file_filtered_dynamic', border=args['border'], u0 =args['u0'], id=id),
-                                             original_url=url_for('api.results_result_bvh_file', id=id)),
-                                                200, headers)
+        return {"status": "deprecated"}
 
 
 @results_space.route("/<int:id>/2d_data")
@@ -743,12 +766,7 @@ class Result2DData(Resource):
             for f_name in base_path.iterdir():
                 z.write(f_name)
         data.seek(0)
-        return send_file(
-            data,
-            mimetype='application/zip',
-            as_attachment=True,
-            attachment_filename=str(result.id)+'.zip'
-        )
+        return {"status": "deprecated"}
 
 
 """
@@ -779,12 +797,14 @@ class SinglePost(Resource):
     @jobs_space.marshal_with(jobs_marshal)
     def post(self, id):
         '''Post a job by given id'''
+        check_auth(model.get_job_by_id(id), auth.get_auth())
         return model.set_job_public(id, g.user.id)
 
     @auth.login_required
     @jobs_space.marshal_with(jobs_marshal)
     def delete(self, id):
         '''delete a posted job by given ID'''
+        check_auth(model.get_job_by_id(id), auth.get_auth())
         return model.set_job_private(id, g.user.id)
 
 # initialize database

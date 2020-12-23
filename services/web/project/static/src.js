@@ -1,4 +1,4 @@
-
+// Source: https://github.com/mrdoob/three.js/blob/dev/examples/webgl_loader_bvh.html
 import * as THREE from 'three';
 
 
@@ -16,7 +16,6 @@ const originalURL = document.getElementById("original-url").content
 const rotate = document.getElementById("auto-rotate").content === "True"
 init();
 animate();
-
 for(var i = 0; i < newURLS.length; i++) {
 	var loader = new BVHLoader()
 	console.log(newURLS[i])

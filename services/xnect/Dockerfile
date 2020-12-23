@@ -75,7 +75,7 @@ COPY ./src/xnect.py /xnect/bin/Release/xnect.py
 COPY ./src/XNECT.params /xnect/data/FullBodyTracker/XNECT.params
 ENV LANG C.UTF-8
 ENV LANG C.UTF-8
-# TODO: REMOVE THAT
+
 ENV FLASK_ENV development
 ENV FLASK_DEBUG 1
 ENV FLASK_APP xnect.py
