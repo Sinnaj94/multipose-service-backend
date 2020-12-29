@@ -11,6 +11,7 @@ The app is available in my other repository, [multipose-service-app](https://git
 ### Screenshots
 The Android App in Action looks like this:
 ![](screenshots/screenshots.png)
+
 A demo video can be watched on [YouTube](https://youtu.be/AUAMqcTYfvY) (https://youtu.be/AUAMqcTYfvY)
 ## Hardware
 You need a graphics card with CUDA-Support for the calculations.
