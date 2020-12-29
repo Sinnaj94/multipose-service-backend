@@ -1,3 +1,4 @@
+# use nvidia cuda base image
 FROM nvidia/cuda:9.1-cudnn7-devel
 
 # install base requirements
@@ -38,8 +39,9 @@ RUN git clone -b 3.4 https://github.com/opencv/opencv
 # checkout opencv version
 RUN git clone -b 3.4 https://github.com/opencv/opencv_contrib
 
-
+# cmake opencv
 WORKDIR /opencv/build
+# these settings are all necessary
 RUN cmake -D CMAKE_BUILD_TYPE=RELEASE -D CMAKE_INSTALL_PREFIX=/usr/lib -D WITH_TBB=ON -D BUILD_NEW_PYTHON_SUPPORT=ON -D WITH_V4L=ON -D WITH_QT=ON -D WITH_OPENGL=ON -D BUILD_TIFF=ON -D_GLIBCXX_USE_CXX11_ABI=0 -D OPENCV_EXTRA_MODULES_PATH=/opencv_contrib/modules/ -DWITH_FFMPEG=1 ..
 RUN make -j8
 RUN make install
@@ -75,7 +77,7 @@ COPY ./src/xnect.py /xnect/bin/Release/xnect.py
 COPY ./src/XNECT.params /xnect/data/FullBodyTracker/XNECT.params
 ENV LANG C.UTF-8
 ENV LANG C.UTF-8
-
+# flask settings
 ENV FLASK_ENV development
 ENV FLASK_DEBUG 1
 ENV FLASK_APP xnect.py

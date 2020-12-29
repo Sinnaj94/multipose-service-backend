@@ -10,17 +10,20 @@ var clock = new THREE.Clock();
 var camera, controls, scene, renderer;
 var mixer, skeletonHelper, mixer1, skeletonHelper1;
 var mixers = [], skeletonHelpers = []
+// Get all urls and convert them
 const newURLS = JSON.parse(document.getElementById("urls-array").content.replace(/'/g, '"'))
 const dataURL = newURLS[0]
 const originalURL = document.getElementById("original-url").content
 const rotate = document.getElementById("auto-rotate").content === "True"
 init();
 animate();
+// Iterate through each url
 for(var i = 0; i < newURLS.length; i++) {
 	var loader = new BVHLoader()
 	console.log(newURLS[i])
 
 	loader.load(newURLS[i], function(result) {
+		// Use bvh loader to load the skeleton into the scene
 		skeletonHelper = new THREE.SkeletonHelper( result.skeleton.bones[ 0 ] );
 		skeletonHelper.skeleton = result.skeleton; // allow animation mixer to bind to THREE.SkeletonHelper directly
 		var boneContainer = new THREE.Group();
@@ -41,7 +44,7 @@ mixers.forEach(m => {
 })
 
 function init() {
-
+	// Initialize camera
 	camera = new THREE.PerspectiveCamera( 60, window.innerWidth / window.innerHeight, 1, 1000 );
 	camera.position.set( 0, 200, 300 );
 	var pos = localStorage.getItem('camera_position')
@@ -100,6 +103,7 @@ function onWindowResize() {
 }
 
 function animate() {
+	// Animation frame
 
 	requestAnimationFrame( animate );
 

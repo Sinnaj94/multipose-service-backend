@@ -12,7 +12,7 @@ std::string videoFilePath = "";
 
 using namespace cv;
 
-
+// Draw the bones (from XNECT)
 void drawBones(cv::Mat &img, XNECT &xnect, int person)
 {
 	int numOfJoints = xnect.getNumOf3DJoints();
@@ -154,6 +154,7 @@ void analyseVideo(std::string &videoFilePath, XNECT &xnect)
 int main(int argc, char **argv)
 {
 	std::cout << "Starting XNECT" << argc << std::endl;
+	// Check if image path is given
 	if (argc <= 1) {
 		std::cout << "Please give the image path (example: ./XNECT <path_to_video>)" << std::endl;
 		return 1;
@@ -162,14 +163,16 @@ int main(int argc, char **argv)
 	std::cout << "Working dir: " << videoFilePath << std::endl;
 
 	std::string video = videoFilePath + "/video.mp4";
-
+    // Check if only a certain number of frames should be analysed (for debugging)
 	int num_frames = -1;
 	if(argc == 3) {
 		std::cout << "Analysing first " << argv[2] << " frames." << std::endl;
 		num_frames = atoi(argv[2]);
 	}
 	XNECT xnect;
+	// Analyse the video in xnect
     analyseVideo(video, xnect);
+    // Save joint and raw joint positions
 	xnect.save_joint_positions(videoFilePath);
 	xnect.save_raw_joint_positions(videoFilePath);
 

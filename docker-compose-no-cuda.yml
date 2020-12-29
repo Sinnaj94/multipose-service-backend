@@ -1,5 +1,5 @@
 version: '3.8'
-# this is the docker compose file for development.
+# this is the docker compose file when you don't want to use xnect
 services:
   # definition of a service
   web:
@@ -12,7 +12,7 @@ services:
     command:
       # creates a database and binds the web service to gunicorn
       bash -c "python3 manage.py create_db
-      && python3 manage.py run -h 0.0.0.0"
+      && gunicorn --bind 0.0.0.0:5000 manage:app"
     environment:
       # configuration file
       - APP_SETTINGS=project.config.Config
@@ -21,8 +21,8 @@ services:
       - ./services/web/:/usr/src/app/
       - file-cache:/usr/data/
     # expose a port to OTHER DOCKER CONTAINERS ONLY
-    ports:
-      - 5000:5000
+    expose:
+      - 5000
     # environment configuration
     env_file:
       - ./.env.dev
@@ -42,7 +42,6 @@ services:
     environment:
       - APP_SETTINGS=project.config.Config
       - NVIDIA_VISIBLE_DEVICES=all
-    runtime: nvidia
     command: python3 manage.py run_worker
     depends_on:
       - redis
@@ -60,30 +59,8 @@ services:
       - POSTGRES_USER=user
       - POSTGRES_PASSWORD=CHANGE_THIS_TO_A_STRONG_PASSWORD
       - POSTGRES_DB=mocap
-    ports:
-      - 5432:5432
-
-  xnect:
-    container_name: xnect
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - DISPLAY=$DISPLAY
-      - QT_X11_NO_MITSHM=1
-    runtime: nvidia
-    volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix
-      - ./services/xnect/src/xnect.py:/xnect/bin/Release/xnect.py
-      - ./services/xnect/src/main.cpp:/xnect/bin/Release/main.cpp
-      - ./videos/:/xnect/videos/
-    build:
-      context: ./services/xnect
-      args:
-        - LEVEL_DB_VERSION=1.20
-    command: flask run --host=0.0.0.0 --port=8081
-    stdin_open: true
-    tty: true
-    ports:
-      - 8081:8081
+    expose:
+      - 5432
 
   nginx:
     build: ./services/nginx

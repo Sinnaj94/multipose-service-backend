@@ -22,131 +22,19 @@ import numpy as np
 from video2bvh.bvh_skeleton import muco_3dhp_skeleton
 
 
-# from IPython.display import HTML
-
-
-def analyse_2d(job_cache_dir, thumbnail_path, persist=True):
-    from video2bvh.pose_estimator_2d import openpose_estimator
-    # get model
-    e2d = openpose_estimator.OpenPoseEstimator(model_folder=Config.OPENPOSE_MODELS_PATH)
-    videogen = skvideo.io.FFmpegReader(str(job_cache_dir / Config.SOURCE_VIDEO_FILE))
-    keypoints_list = []
-
-    (video_length, img_height, img_width, _) = videogen.getShape()
-    i = 0
-    job = get_current_job()
-
-    thumbnail = None
-    for frame in videogen.nextFrame():
-        all_keypoints = e2d.estimate(img_list=[frame])
-
-        keypoints = all_keypoints[0]
-        if not isinstance(keypoints, np.ndarray) or len(keypoints.shape) != 3:
-            keypoints_list.append(None)
-        else:
-            # todo: What to do if keypoints list has multiple persons?
-            keypoints_list.append(keypoints[0])
-        i += 1
-        # save progress
-        job.meta['stage']['progress'] = round(i / video_length, 2)
-        job.save_meta()
-
-    videogen.close()
-    # todo: GET FPS FROM META
-    config = {'img_width': img_width, 'img_height': img_height, 'frames': video_length, 'fps': 60}
-
-    return keypoints_list, config, thumbnail
-
-
-def analyse_3d(pose2d, conf, result_cache_dir):
-    e3d = estimator_3d.Estimator3D(
-        config_file=os.path.join(Config.MODELS_3D_DIR, "video_pose.yaml"),
-        checkpoint_file=os.path.join(Config.MODELS_3D_DIR, 'best_58.58.pth')
-    )
-    pose3d = e3d.estimate(pose2d, image_width=conf['img_width'], image_height=conf['img_height'])
-    subject = 'S1'
-    cam_id = '55011271'
-    cam_params = camera.load_camera_params('./cameras.h5')[subject][cam_id]
-    R = cam_params['R']
-    T = 0
-    azimuth = cam_params['azimuth']
-
-    # save config
-    conf = {'subject': subject,
-            'cam_id': cam_id,
-            'cam_params': cam_params,
-            'R': R,
-            'T': T,
-            'azimuth': azimuth}
-
-    pose3d_world = camera.camera2world(pose=pose3d, R=R, T=T)
-    pose3d_world[:, :, 2] -= np.min(pose3d_world[:, :, 2])  #
-    return pose3d_world, conf
-
-
-def export_video(pose3d_world, video_file, config, fps=60):
-    h36m_skel = h36m_skeleton.H36mSkeleton()
-    ani = vis.vis_3d_keypoints_sequence(
-        keypoints_sequence=pose3d_world,
-        skeleton=h36m_skel,
-        azimuth=np.array(config['azimuth']),
-        fps=fps,
-        output_file=video_file
-    )
-
-
-def scale_world_3d(pose3d_world, scale_factor=.1):
-    return pose3d_world * scale_factor
-
-
-def get_rotation_matrix(axis, theta):
-    # Source: https://stackoverflow.com/questions/6802577/rotation-of-3d-vector/25709323
-    # Euler Rodrigues Formula
-    axis = np.asarray(axis)
-    axis = axis / math.sqrt(np.dot(axis, axis))
-    a = math.cos(theta / 2.0)
-    b, c, d = -axis * math.sin(theta / 2.0)
-    aa, bb, cc, dd = a * a, b * b, c * c, d * d
-    bc, ad, ac, ab, bd, cd = b * c, a * d, a * c, a * b, b * d, c * d
-    return np.array([[aa + bb - cc - dd, 2 * (bc + ad), 2 * (bd - ac)],
-                     [2 * (bc - ad), aa + cc - bb - dd, 2 * (cd + ab)],
-                     [2 * (bd + ac), 2 * (cd - ab), aa + dd - bb - cc]])
-
-
-def rotate_world_3d(pose3d_world, axis, radians):
-    return np.array([[np.dot(get_rotation_matrix(axis, radians), bone) for bone in frame] for frame in pose3d_world])
-
-
-def export_video_2d(keypoints_list, video_file, output_dir):
-    cap = cv2.VideoCapture(str(video_file))
-    vis_result_dir = output_dir / '2d_pose_vis'  # path to save the visualized images
-    if not vis_result_dir.exists():
-        os.makedirs(vis_result_dir)
-
-    op_skel = openpose_skeleton.OpenPoseSkeleton()
-
-    for i, keypoints in enumerate(keypoints_list):
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        # keypoint whose detect confidence under kp_thresh will not be visualized
-        vis.vis_2d_keypoints(
-            keypoints=keypoints,
-            img=frame,
-            skeleton=op_skel,
-            kp_thresh=0.4,
-            output_file=vis_result_dir / f'{i:04d}.png'
-        )
-    cap.release()
-
-
 def prepare(my_job_id, video):
+    """
+    prepare a job and return several parameters
+    :param my_job_id: database id of the job
+    :param video: video file as bytes array
+    """
     from project.model import model
+    # get the current job
     job = get_current_job()
 
     job.meta['stage'] = {'name': 'preparing', 'progress': None}
 
+    # get the redis id for the job
     job_id = str(get_current_job().get_id())
     # add to database
     job_cache_dir = Path(os.path.join(Config.CACHE_DIR, str(my_job_id)))
@@ -156,7 +44,7 @@ def prepare(my_job_id, video):
     if not job_cache_dir.exists():
         os.makedirs(job_cache_dir)
 
-    # save the SOURCE video in the cache folder
+    # save the source video in the cache folder
     filename = os.path.join(job_cache_dir, Config.SOURCE_VIDEO_FILE)
     print("Saving video at %s" % filename)
     with(open(filename, 'wb')) as file:
@@ -171,6 +59,7 @@ def prepare(my_job_id, video):
         videogen.close()
         break
 
+    # retrieve the fps from the video
     fps = videogen.inputfps
 
     # result
@@ -183,6 +72,7 @@ def prepare(my_job_id, video):
     if not result_cache_dir.exists():
         os.makedirs(result_cache_dir)
 
+    # get specific file locations
     pose2d_file = result_cache_dir / Config.DATA_2D_FILE
     pose3d_file = result_cache_dir / Config.DATA_3D_FILE
     # create a thumbnail
@@ -198,87 +88,18 @@ def prepare(my_job_id, video):
            result_cache_dir, fps
 
 
-def convert_openpose_baseline(video):
-    job, job_id, model, job_cache_dir, pose2d_file, pose3d_file, thumbnail_path, filename, result, result_cache_dir, \
-    fps = prepare(video)
-
-    if not pose2d_file.exists() or not Config.CACHE_RESULTS:
-        print("Beginning to 2d analyse job %s" % job_id)
-
-        points_list, config_2d, thumbnail = analyse_2d(job_cache_dir, thumbnail_path)
-
-        points_list = smooth.filter_missing_value(
-            keypoints_list=points_list,
-            method='ignore'
-        )
-
-        if not points_list:
-            print("Job analysis failed.")
-            result.result_code = model.ResultCode.failure
-            model.db.session.commit()
-            return False
-        pose2d = np.stack(points_list)[:, :, :2]
-        print("Finished to 2d analyse job %s" % job_id)
-        print("---")
-        print("2D Rendering the video")
-        job.meta['stage'] = {'name': '2d render', 'progress': None}
-        export_video_2d(points_list, filename, result_cache_dir / "imgs")
-        print("2D Rendering finished")
-        if Config.CACHE_RESULTS:
-            np.save(result_cache_dir / '2d_pose.npy', pose2d)
-            np.save(result_cache_dir / '2d_config.npy', config_2d)
-
-    else:
-        print("Found 2d Cache for %s" % job_id)
-        pose2d = np.load(pose2d_file).values()
-        config_2d = np.load(result_cache_dir / '2d_config.npy').values()
-
-    job.meta['stage'] = {'name': '3d'}
-    job.save_meta()
-
-    if not pose3d_file.exists() or not Config.CACHE_RESULTS:
-        print("Beginning to 3d analyse job %s" % job_id)
-        pose3d_world, conf_3d = analyse_3d(pose2d, config_2d, result_cache_dir)
-        print("Finished to 3d analyse job %s" % job_id)
-        if Config.CACHE_RESULTS:
-            np.save(result_cache_dir / '3d_pose.npy', pose3d_world)
-            np.save(result_cache_dir / '3d_conf.npy', conf_3d)
-    else:
-        print("Found 3d Cache for %s" % job_id)
-        pose3d_world = np.load(result_cache_dir / '3d_pose.npy').values()
-        conf_3d = np.load(result_cache_dir / '3d_conf.npy').values()
-
-    # GIF
-    job.meta['stage'] = {'name': 'render'}
-
-    job.save_meta()
-    print("Generating a preview Video for %s" % job_id)
-    export_video(pose3d_world, result_cache_dir / Config.OUTPUT_VIDEO_FILE, conf_3d, fps=config_2d['fps'])
-
-    job.meta['stage'] = {'name': 'bvh'}
-    job.save_meta()
-
-    print("Generating a BVH file for %s" % job_id)
-    bvh_file = result_cache_dir / Config.OUTPUT_BVH_FILE
-    pose3d_world = scale_world_3d(pose3d_world)
-    pose3d_world = rotate_world_3d(pose3d_world, [-1, 0, 0], math.pi * 90 / 180)
-    if Config.EXPORT_FORMAT == "CMU":
-        cmu_skel = cmu_skeleton.CMUSkeleton()
-        channels, header = cmu_skel.poses2bvh(pose3d_world, output_file=bvh_file)
-    elif Config.EXPORT_FORMAT == "H36M":
-        h36m_skel = h36m_skeleton.H36mSkeleton()
-        _ = h36m_skel.poses2bvh(pose3d_world, output_file=bvh_file)
-    else:
-        raise ValueError("Unrecognized Panoptic style %s. You must decide between CMU and H36M.", Config.EXPORT_FORMAT)
-
-    result.result_code = model.ResultCode.success
-    model.db.session.commit()
-    return True
-
-
 def analyse_xnect(video, job_id, result_cache_dir, result, model):
-    # Make request to xnect server
+    """
+    analyse a video file in xnect container
+    :param video: video as byte data
+    :param job_id: redis job id
+    :param result_cache_dir: cache dir of the current job
+    :param result: current result from model
+    :param model: model reference to database
+    :return: paths to raw xnect data, or false, if failed
+    """
     try:
+        # send the video to xnect via http post request
         files = {"video": ("video.mp4", video, "video/mp4")}
         r = requests.post("http://xnect:8081/%s" % str(job_id), files=files, timeout=999999)
         if r.status_code != 200:
@@ -286,15 +107,17 @@ def analyse_xnect(video, job_id, result_cache_dir, result, model):
             model.db.session.commit()
             return False
         finished = False
+        # check via get request, if the job has finished yet
         while not finished:
             r = requests.get("http://xnect:8081/finished")
             finished = r.json()['finished']
             print("Not yet finished...")
             time.sleep(1)
-
+        # get the data for following urls:
         urls = ["raw2d", "raw3d", "ik3d"]
         paths = {}
         for url in urls:
+            # save data for the urls
             r = requests.get("http://xnect:8081/%s/%s" % (str(job_id), url))
             path = os.path.join(result_cache_dir, "%s.txt" % url)
             open(path, 'wb').write(r.content)
@@ -305,25 +128,45 @@ def analyse_xnect(video, job_id, result_cache_dir, result, model):
             paths[url] = path
         return paths
     except:
+        # set failure, if an error occurs
         result.result_code = model.ResultCode.failure
         model.db.session.commit()
         return False
 
 
 def interpolate_poses(pred, start, end):
+    """
+    Interpolate poses between a start and an end frame
+    :param pred: Poses array
+    :param start: Start frame
+    :param end: End frame
+    :return:
+    """
     start_data = pred[start]["ik3d"][0] * 0.01
     end_data = pred[end]["ik3d"][0] * 0.01
     print("Found one", start_data)
 
 
 def convert_xnect(my_job_id, video):
+    """
+    Sends a video with a given redis id to xnect
+    :param my_job_id: redis id
+    :param video: video as bytecode
+    :return:
+    """
+    # prepare the video
     job, job_id, model, job_cache_dir, pose2d_file, pose3d_file, thumbnail_path, filename, result, result_cache_dir, \
     fps = prepare(my_job_id, video)
+    # set the progress to indeterminate
     job.meta['stage'] = {'name': 'xnect', 'progress': None}
-
+    # analyse the actual video
     paths = analyse_xnect(video, str(my_job_id), result_cache_dir, result, model)
     if paths is False:
+        # there is no data, so return
+        result.result_code = model.ResultCode.failure
         return False
+
+    # convert the data
     raw2d, raw3d, ik3d = paths["raw2d"], paths["raw3d"], paths["ik3d"]
     pred, first_complete, num_people = xnect_to_bvh(raw2d, raw3d, ik3d, result, model)
 
@@ -332,7 +175,6 @@ def convert_xnect(my_job_id, video):
     for pidx in range(num_people):
         person_keypoints = []
         for idx in range(first_complete, len(pred)):
-            # TODO: Interpolate more
             if pred[idx]['valid_ik'][pidx] and not pred[idx]['is_outlier'][pidx]:
                 person_keypoints.append(pred[idx]["ik3d"][pidx] * 0.01)
                 last_cached_index = idx
@@ -356,6 +198,12 @@ def convert_xnect(my_job_id, video):
 
 
 def euc_dist(a, b):
+    """
+    euclidian distance between a and b
+    :param a: array of point a
+    :param b: array of point b
+    :return: euc distance
+    """
     s = len(a)
     summe = 0
     for i in range(s):
@@ -364,6 +212,12 @@ def euc_dist(a, b):
 
 
 def calc_distance(a, b):
+    """
+    sum of euclidian distance of two multidimensional arrays
+    :param a: multidimensional array
+    :param b: multidimensional array
+    :return: sum of euclidian distance of multi array
+    """
     erg = 0
     s = len(a)
     for i in range(s):
@@ -372,6 +226,12 @@ def calc_distance(a, b):
 
 
 def find_first_complete_keyframe(pred, num_people):
+    """
+    find the first complete keyframe in an xnect predictions array
+    :param pred: xnect predictions array
+    :param num_people: number of people
+    :return: first frame as index
+    """
     for idx in range(0, len(pred)):
         valid = 0
         for pidx in range(len(pred[idx]["valid_ik"])):
@@ -382,12 +242,23 @@ def find_first_complete_keyframe(pred, num_people):
 
 
 def sort(start, end, pred, backwards=False):
+    """
+    sorting algorithm to reindex the people
+    :param start: first frame
+    :param end: last frame
+    :param pred: preconverted prediction xnect array
+    :param backwards: if the array should be sorted backwards instead of forward
+    :return: sorted array with correct person indices
+    """
     step = 1
     if backwards:
         step = -1
+    # go through prediction array from start to end frame
     for idx in range(start, end, step):
+        # get the current data and check if the keyframe is valid
         current_data = np.empty_like(pred[idx]["ik3d"])
         current_valid = np.empty_like(pred[idx]["valid_ik"])
+        # go through each keyframe and check the best match for each person using the keyframe before
         for pidx in range(len(pred[idx]["ik3d"])):
             if pred[idx]["valid_ik"][pidx]:
                 if backwards:
@@ -411,17 +282,28 @@ def sort(start, end, pred, backwards=False):
 
 
 def outlier_map(pred, num_people, m):
+    """
+    get all outliers as a map
+    """
+    # go through each keyframe and check if the keyframe is an outlier
     for pidx in range(0, num_people):
         dists = np.zeros(len(pred))
         for idx in range(len(pred)):
             dists[idx] = calc_distance(pred[idx]["ik3d"][pidx], pred[idx - 1]["ik3d"][pidx])
         mean = np.mean(dists)
+        # it is an outlier, if the distance to a person is m times the distance of the mean distance of this person
         outlier_map = [(dist > mean * m) for dist in dists]
         for i in range(len(outlier_map)):
             pred[i]["is_outlier"][pidx] = outlier_map[i]
 
 
 def readjust_person_index_ik3d(pred, max_people):
+    """
+    readjust all person index, including forward and backwards sort and outlier map
+    :param pred: sorted prediction array
+    :param max_people: number of tracked people
+    :return: adjusted array with correct person indizes
+    """
     first_complete = find_first_complete_keyframe(pred, max_people)
     print("First complete", first_complete)
     print("Forward sort")
@@ -433,11 +315,23 @@ def readjust_person_index_ik3d(pred, max_people):
 
 
 def xnect_to_bvh(raw2d_file, raw3d_file, ik3d_file, result, model):
+    """
+    converts the xnect data to a bvh file
+    :param raw2d_file: raw 2d data from xnect
+    :param raw3d_file: raw 3d data from xnect
+    :param ik3d_file: raw 3d data (ik) from xnect
+    :param result: result object from model
+    :param model: model to the database
+    :return: sorted array, first complete keyframe and number of people
+    """
+    # load the files as a numpy array
     p2d = np.loadtxt(raw2d_file)
     p3d = np.loadtxt(raw3d_file)
     i3d = np.loadtxt(ik3d_file)
+    # if there is no data, abort the execution and set the result to failed
     if len(i3d) == 0:
         result.result_code = model.ResultCode.failure
+        model.db.session.commit()
         return False
     num_people = int(np.max(p2d.T[1]) + 1)
     print(num_people)
@@ -459,6 +353,8 @@ def xnect_to_bvh(raw2d_file, raw3d_file, ik3d_file, result, model):
 
     # iterate through keyframes of p3d
     origin = None
+    # source: XNECT Matlab demo import
+    # go through each p3d array and build the poeple
     for i in range(p3d.shape[0]):
         idx = int(p2d[i][0])
         pidx = int(p2d[i][1])
@@ -473,6 +369,7 @@ def xnect_to_bvh(raw2d_file, raw3d_file, ik3d_file, result, model):
                                   np.greater(pred[idx]["pred2d"][pidx].T[1], 0)).reshape([14, 1])
 
     origin = None
+    # source: XNECT Matlab demo import
     for i in range(i3d.shape[0]):
         idx = int(i3d[i][0])
         pidx = int(i3d[i][1])

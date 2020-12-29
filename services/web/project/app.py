@@ -1,12 +1,13 @@
-#!flask/bin/python
-import base64
+'''
+This is the main application. From here the server is started and connects to the database
+'''
+# import all requirements
 import enum
 import io
 import os
 import pathlib
 import time
 import zipfile
-
 import redis
 from flask_restplus.fields import Raw
 from rq.job import Job as RedisJob
@@ -17,16 +18,13 @@ from flask_restplus import Api, Resource, abort, fields, ValidationError
 from werkzeug.exceptions import HTTPException, NotFound, BadRequest
 from project import parsers
 from rq import Queue, Connection
-
 from bvh_smooth.smooth_position import butterworth as pos_butterworth
 from bvh_smooth.smooth_rotation import butterworth as rot_butterworth
-
 # authentication
 from flask_httpauth import HTTPBasicAuth
-
 # initialization
 from project.config import Config
-from project.conversion_task import convert_openpose_baseline, convert_xnect
+from project.conversion_task import convert_xnect
 from project.parsers import user_metadata_parser
 
 app = Flask(__name__)
@@ -34,17 +32,19 @@ app = Flask(__name__)
 app_settings = os.getenv("APP_SETTINGS")
 app.config.from_object(app_settings)
 
-# extensions
+# Define HTTPBasic Authentication to authorize users
 auth = HTTPBasicAuth()
 
-
+# A Blueprint is the basic configuration of the API, the API has A description and a title
 blueprint = Blueprint('api', __name__, url_prefix='/api/v1', )
-api = Api(blueprint, description="Motion Capturing from single RGB-Video", version="1", title="MoCap API")
-
+api = Api(blueprint, description="Motion Capturing from single RGB-Video", version="1", title="Multipose API")
 app.register_blueprint(blueprint)
 
-from rq import cancel_job
+
 class ResultCode(enum.IntEnum):
+    """
+    code for 3D Motion Capturing results
+    """
     default = 2
     success = 1
     failure = -1
@@ -52,11 +52,17 @@ class ResultCode(enum.IntEnum):
 
 
 class Count(Raw):
+    """
+    Counts an array, used for marshalling
+    """
     def format(self, value):
         return len(value)
 
 
 class BookmarkedByCurrentUser(Raw):
+    """
+    Get all bookmarks by the current user
+    """
     def format(self, value):
         for v in value:
             if g.user.id == v.user_id:
@@ -143,8 +149,13 @@ statistics_marshal = api.model('JobStatistics', {
     'failed' : fields.Integer
 })
 
-# validate a min length of a http attribute
+
 def min_length(min_length):
+    """
+    validate a min length of a http attribute
+    :param min_length: minimal length of object
+    :return: if length is is valid
+    """
     def validate(s):
         if len(s) >= min_length:
             return s
@@ -160,9 +171,13 @@ conn = redis.from_url(app.config["REDIS_URL"])
 # import
 import project.model.model as model
 
-# redirect to api/v1 (can be deleted if web service is built in future)
+
 @app.route("/")
 def redirect_to_api():
+    """
+    redirect to api/v1 (can be deleted if web service is built in future)
+    :return: redirect to api/v1
+    """
     return redirect("/api/v1")
 
 """
@@ -186,11 +201,20 @@ class Status(Resource):
 
 
 class NotAuthorized(HTTPException):
+    """
+    Exception that is thrown when a user is not authorized
+    """
     code = 401
     description = "You are not authorized to do that"
 
 
 def check_auth(job, autho):
+    """
+    check if the current user is authorized to access a certain job
+    :param job: job to be checked
+    :param autho: authorization object from flask
+    :return: if user is authorized to access the job
+    """
     password = auth.get_auth_password(autho)
     user = auth.authenticate(autho, password)
     auth.auth_error_callback(403)
@@ -428,13 +452,12 @@ class FailedJobs(Resource):
 class Bookmarks(Resource):
     @auth.login_required
     @jobs_space.marshal_list_with(jobs_marshal)
-    @api.expect(parsers.posts_parser)
     @api.response(401, 'The user is not permitted to do this action')
     @api.response(200, 'Return all bookmarks saved by the authorized user')
     def get(self):
         '''Return all bookmarks saved by the authorized user'''
         args = parsers.posts_parser.parse_args()
-        return model.get_bookmarks_by_user(g.user.id, args['tags[]'])
+        return model.get_bookmarks_by_user(g.user.id)
 
 
 """

@@ -12,9 +12,9 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['FINISHED'] = False
 my_status = {}
 
+
 class InvalidUsage(Exception):
     status_code = 400
-
     def __init__(self, message, status_code=None, payload=None):
         Exception.__init__(self)
         self.message = message
@@ -31,16 +31,27 @@ class InvalidUsage(Exception):
 # redirect
 @app.route("/")
 def status():
+    """
+    Check if xnect container is running
+    :return:
+    """
     return jsonify({"message": "XNECT running."})
 
 
 @app.route("/finished")
 def finished():
+    """
+    check if latest job is finished
+    :return:
+    """
     return jsonify({"finished": app.config['FINISHED']})
 
 
 @app.route("/<int:id>", methods=['GET', 'POST'])
 def analyse(id):
+    """
+    analyse a video with given id and a video
+    """
     if request.method == 'POST':
         print(request.files)
         app.config['FINISHED'] = False
@@ -60,6 +71,7 @@ def analyse(id):
         file.save(filename)
         print(folder)
         try:
+            # run a subprocess in C++
             subprocess.run("./XNECT " + folder, shell=True, check=True)
             my_status[str(id)] = True
             app.config['FINISHED'] = True
@@ -74,25 +86,51 @@ def analyse(id):
 
 
 def get_file(id, filename):
+    """
+    get a certain file and send it via flask
+    :param id:
+    :param filename:
+    :return:
+    """
     folder = os.path.join(app.config['UPLOAD_FOLDER'], str(id))
     return send_from_directory(directory=folder, filename=filename)
 
 
 @app.route("/<int:id>/ik3d", methods=['GET'])
 def get_ik3d(id):
+    """
+    Get IK3D File
+    :param id:
+    :return:
+    """
     return get_file(id, "IK3D.txt")
 
 
 @app.route("/<int:id>/ik2d", methods=['GET'])
 def get_ik2d(id):
+    """
+    Get IK2D File
+    :param id:
+    :return:
+    """
     return get_file(id, "IK2D.txt")
 
 
 @app.route("/<int:id>/raw3d", methods=['GET'])
 def get_raw3d(id):
+    """
+    Get RAW3D File
+    :param id:
+    :return:
+    """
     return get_file(id, "raw3D.txt")
 
 
 @app.route("/<int:id>/raw2d", methods=['GET'])
 def get_raw2d(id):
+    """
+    Get RAW2D File
+    :param id:
+    :return:
+    """
     return get_file(id, "raw2D.txt")

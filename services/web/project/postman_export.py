@@ -1,3 +1,6 @@
+"""
+export swagger documentation as postman configuration file
+"""
 import json
 from project.app import api
 
