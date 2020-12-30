@@ -96,4 +96,5 @@ The Methods are also listed in the wiki.
 - [video2bvh](https://github.com/KevinLTT/video2bvh) by KevinLTT - MIT License
 - [BVHSmooth](https://github.com/vdbalbom/BVHsmooth) by Virgínia Balbo - MIT License
 - [XNECT](https://gvv.mpi-inf.mpg.de/projects/XNect/) by Mehta et al. (Source files not included in this repository) - ONLY FOR NON-COMMERCIAL PURPOSES
+## Frameworks
 Frameworks used can be found in the according requirements.txt (Managed by pip package manager)
