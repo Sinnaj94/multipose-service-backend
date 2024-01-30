@@ -2,6 +2,31 @@
 This is an API which is using xnect to
 calculate dynamic pose data. Input data is a rgb video. It can process
 multiple people.
+
+## Backend Technologies
+
+The backend of our application utilizes a range of technologies and libraries to ensure efficient processing and data handling.
+
+### Technologies
+- **Flask**: A flexible WSGI web application framework.
+- **Flask-HTTPAuth**: Simplifies HTTP authentication in Flask.
+- **Flask-HTTPBasicAuth**: Basic HTTP authentication for Flask.
+- **Flask-SQLAlchemy**: Adds SQLAlchemy support to Flask.
+- **Flask-restplus**: Facilitates building REST APIs with Flask.
+- **gunicorn**: A robust Python WSGI HTTP Server for UNIX systems.
+
+### Libraries
+(Include the list of Libraries as previously provided)
+
+## Other Technologies
+
+The project also incorporates several key technologies for its infrastructure:
+
+- **Docker**: For containerizing applications and ensuring consistent environments across different systems.
+- **Docker-compose**: Manages multi-container Docker applications.
+- **Redis**: An in-memory data structure store, used as a database and cache.
+- **PostgreSQL**: A powerful, open-source object-relational database system.
+- **XNECT**: Real-time motion capture software using standard video cameras.
 ## License
 The XNECT-Files are not included in this repository, because their license forbids it.
 You have to manually request them from [their page](https://gvv.mpi-inf.mpg.de/projects/XNect/).
