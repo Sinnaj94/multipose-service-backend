@@ -15,8 +15,6 @@ The backend of our application utilizes a range of technologies and libraries to
 - **Flask-restplus**: Facilitates building REST APIs with Flask.
 - **gunicorn**: A robust Python WSGI HTTP Server for UNIX systems.
 
-### Libraries
-(Include the list of Libraries as previously provided)
 
 ## Other Technologies
 
